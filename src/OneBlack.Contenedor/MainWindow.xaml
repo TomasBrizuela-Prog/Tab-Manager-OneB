@@ -1,0 +1,27 @@
+﻿<Window x:Class="OneBlack.Contenedor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:core="clr-namespace:OneBlack.Core;assembly=OneBlack.Core"
+        Title="OneBlack — Spike Reparenting" Height="600" Width="900"
+        Background="#0a0a0b">
+    <DockPanel>
+        <!-- Barra de botones arriba -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
+                    Background="#141416" Height="44">
+            <Button x:Name="botonAdoptar" Content="Adoptar Notepad"
+                    Click="botonAdoptar_Click"
+                    Margin="8" Padding="12,4" />
+            <Button x:Name="botonDevolver" Content="Devolver"
+                    Click="botonDevolver_Click"
+                    Margin="8" Padding="12,4" />
+            <TextBlock x:Name="textoEstado" Text="Listo."
+                       Foreground="#888780" VerticalAlignment="Center"
+                       Margin="12,0" />
+        </StackPanel>
+
+        <!-- El hueco: acá vive nuestra VentanaAnfitriona -->
+        <Border BorderBrush="#3C3489" BorderThickness="2" Margin="8">
+            <core:VentanaAnfitriona x:Name="anfitriona" />
+        </Border>
+    </DockPanel>
+</Window>
