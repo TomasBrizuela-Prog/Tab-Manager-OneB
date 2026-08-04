@@ -15,6 +15,11 @@ namespace OneBlack.Contenedor
         // (En el spike manejamos una sola; el adoptador ya soporta varias.)
         private IntPtr hwndNotepadAdoptada = IntPtr.Zero;
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         public MainWindow()
         {
             InitializeComponent();
@@ -111,6 +116,65 @@ namespace OneBlack.Contenedor
             else
             {
                 textoEstado.Text = "Nada que devolver.";
+            }
+        }
+        private void botonListar_Click(object sender, RoutedEventArgs e)
+        {
+            var buscador = new BuscadorDeVentanas();
+            var candidatas = buscador.BuscarCandidatas();
+
+            // Por ahora, mostramos la lista en un MessageBox para verla con los ojos.
+            var texto = new System.Text.StringBuilder();
+            texto.AppendLine($"Encontré {candidatas.Count} ventanas candidatas:\n");
+            foreach (var c in candidatas)
+                texto.AppendLine(c.ToString());
+
+            MessageBox.Show(texto.ToString(), "Ventanas adoptables");
+        }
+        private void botonAdoptarVSCode_Click(object sender, RoutedEventArgs e)
+        {
+            // Buscar entre las candidatas la primera que sea VS Code.
+            var buscador = new BuscadorDeVentanas();
+            var candidatas = buscador.BuscarCandidatas();
+
+            var vscode = candidatas.FirstOrDefault(c =>
+                c.NombreProceso.Equals("Code", StringComparison.OrdinalIgnoreCase));
+
+            if (vscode == null)
+            {
+                textoEstado.Text = "No encontré VS Code abierto.";
+                return;
+            }
+
+            if (adoptador.YaEstaAdoptada(vscode.Hwnd))
+            {
+                textoEstado.Text = "Ese VS Code ya está adoptado.";
+                return;
+            }
+
+            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
+            int ancho = (int)anfitriona.ActualWidth;
+            int alto = (int)anfitriona.ActualHeight;
+
+            bool ok = adoptador.Adoptar(vscode.Hwnd, hwndContenedor, ancho, alto);
+
+            if (ok)
+            {
+                hwndNotepadAdoptada = vscode.Hwnd;
+
+                // SACUDÓN FUERTE: minimizar y restaurar fuerza a Chromium a reconstruir
+                // su superficie de render por completo. 6 = minimizar, 9 = restaurar.
+                const int SW_MINIMIZE = 6;
+                const int SW_RESTORE = 9;
+                ShowWindow(vscode.Hwnd, SW_MINIMIZE);
+                ShowWindow(vscode.Hwnd, SW_RESTORE);
+                MoveWindow(vscode.Hwnd, 0, 0, ancho, alto, true);
+
+                textoEstado.Text = $"VS Code adoptado (HWND {vscode.Hwnd}).";
+            }
+            else
+            {
+                textoEstado.Text = "Falló la adopción de VS Code.";
             }
         }
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

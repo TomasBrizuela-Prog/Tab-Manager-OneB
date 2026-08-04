@@ -14,6 +14,12 @@
             <Button x:Name="botonDevolver" Content="Devolver"
                     Click="botonDevolver_Click"
                     Margin="8" Padding="12,4" />
+            <Button x:Name="botonListar" Content="Listar ventanas"
+        Click="botonListar_Click"
+        Margin="8" Padding="12,4" />
+            <Button x:Name="botonAdoptarVSCode" Content="Adoptar VS Code"
+        Click="botonAdoptarVSCode_Click"
+        Margin="8" Padding="12,4" />
             <TextBlock x:Name="textoEstado" Text="Listo."
                        Foreground="#888780" VerticalAlignment="Center"
                        Margin="12,0" />
