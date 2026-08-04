@@ -1,55 +1,45 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace OneBlack.Core
 {
-    /// <summary>
-    /// Guarda el estado original de una ventana antes de adoptarla,
-    /// para poder devolverla intacta. La regla de oro del reparenting:
-    /// guardar ANTES de tocar, restaurar al soltar.
-    /// </summary>
     public class EstadoOriginalVentana
     {
-        public IntPtr PadreOriginal;   // quién era el padre antes (normalmente el escritorio)
-        public int EstilosOriginales;  // los estilos de ventana que tenía
-        public int X, Y, Ancho, Alto;  // dónde y de qué tamaño estaba
+        public IntPtr PadreOriginal;
+        public int EstilosOriginales;
+        public int X, Y, Ancho, Alto;
     }
 
     /// <summary>
-    /// El músculo del reparenting: encuentra una ventana externa ( Ej: Notepad),
-    /// la mete dentro de un HWND contenedor, y sabe devolverla a su estado original.
+    /// El músculo del reparenting, ahora para VARIAS ventanas a la vez.
+    /// Lleva un diccionario de las ventanas adoptadas (clave = HWND) y
+    /// persiste el estado en disco tras cada cambio, para el janitor.
     /// </summary>
     public class AdoptadorDeVentanas
     {
-        // --- Constantes Win32 ---
         private const int GWL_STYLE = -16;
         private const int WS_CHILD = 0x40000000;
         private const int WS_POPUP = unchecked((int)0x80000000);
-        private const int WS_CAPTION = 0x00C00000;        // barra de título
-        private const int WS_THICKFRAME = 0x00040000;     // borde redimensionable
+        private const int WS_CAPTION = 0x00C00000;
+        private const int WS_THICKFRAME = 0x00040000;
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_FRAMECHANGED = 0x0020;
 
-        // --- P/Invoke ---
         [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
             int X, int Y, int cx, int cy, uint uFlags);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
         [DllImport("user32.dll")]
         private static extern IntPtr GetDesktopWindow();
         [DllImport("user32.dll")]
@@ -58,84 +48,119 @@ namespace OneBlack.Core
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
-        // Estado guardado de la ventana que adoptamos (para devolverla).
-        private EstadoOriginalVentana estadoGuardado;
-        private IntPtr hwndAdoptada = IntPtr.Zero;
+        // Ahora una COLECCIÓN, no una sola ventana. Clave = HWND de la adoptada.
+        private readonly Dictionary<IntPtr, EstadoOriginalVentana> adoptadas
+            = new Dictionary<IntPtr, EstadoOriginalVentana>();
+
+        private readonly PersistenciaEstado persistencia = new PersistenciaEstado();
+
+        public IntPtr BuscarNotepad() => FindWindow("Notepad", null);
 
         /// <summary>
-        /// Busca la ventana de Notepad por su nombre de clase.
-        /// Devuelve IntPtr.Zero si no la encuentra.
+        /// ¿Está esta ventana ya adoptada? Evita adoptar dos veces la misma.
         /// </summary>
-        public IntPtr BuscarNotepad()
-        {
-            // "Notepad" es el nombre de clase de la ventana del Bloc de notas clásico.
-            return FindWindow("Notepad", null);
-        }
+        public bool YaEstaAdoptada(IntPtr hwndVentana) => adoptadas.ContainsKey(hwndVentana);
 
-        /// <summary>
-        /// Adopta la ventana: guarda su estado, la vuelve hija del contenedor,
-        /// le saca los adornos de ventana suelta, y la encaja en la región dada.
-        /// </summary>
         public bool Adoptar(IntPtr hwndVentana, IntPtr hwndContenedor, int ancho, int alto)
         {
             if (hwndVentana == IntPtr.Zero || hwndContenedor == IntPtr.Zero)
                 return false;
 
-            // 1. GUARDAR ANTES DE TOCAR. Sin esto no podemos devolverla sana.
+            // Guarda contra doble adopción: si ya la tenemos, no la re-procesamos.
+            if (adoptadas.ContainsKey(hwndVentana))
+                return false;
+
+            // 1. GUARDAR ANTES DE TOCAR.
             GetWindowRect(hwndVentana, out RECT rect);
-            estadoGuardado = new EstadoOriginalVentana
+            var estado = new EstadoOriginalVentana
             {
-                PadreOriginal = GetDesktopWindow(),   // volverá al escritorio al soltar
+                PadreOriginal = GetDesktopWindow(),
                 EstilosOriginales = GetWindowLong(hwndVentana, GWL_STYLE),
                 X = rect.Left,
                 Y = rect.Top,
                 Ancho = rect.Right - rect.Left,
                 Alto = rect.Bottom - rect.Top
             };
-            hwndAdoptada = hwndVentana;
 
-            // 2. CAMBIAR ESTILOS: sacar los de ventana suelta, poner el de hija.
-            int estilos = estadoGuardado.EstilosOriginales;
-            estilos &= ~WS_POPUP;        // quitar popup
-            estilos &= ~WS_CAPTION;      // quitar barra de título
-            estilos &= ~WS_THICKFRAME;   // quitar borde redimensionable
-            estilos |= WS_CHILD;         // agregar: es hija
+            // 2. CAMBIAR ESTILOS.
+            int estilos = estado.EstilosOriginales;
+            estilos &= ~WS_POPUP;
+            estilos &= ~WS_CAPTION;
+            estilos &= ~WS_THICKFRAME;
+            estilos |= WS_CHILD;
             SetWindowLong(hwndVentana, GWL_STYLE, estilos);
 
-            // 3. EL REPARENTING: el padre de Notepad ahora es nuestro contenedor.
+            // 3. REPARENTING.
             SetParent(hwndVentana, hwndContenedor);
 
-            // 4. ENCAJARLA en la región (arriba-izquierda del contenedor, tamaño dado).
+            // 4. ENCAJAR.
             SetWindowPos(hwndVentana, IntPtr.Zero, 0, 0, ancho, alto,
                 SWP_NOZORDER | SWP_FRAMECHANGED);
+
+            // 5. REGISTRAR en la colección y PERSISTIR el estado completo.
+            adoptadas[hwndVentana] = estado;
+            PersistirTodo();
+
+            return true;
+        }
+
+        public bool Devolver(IntPtr hwndVentana, IntPtr hwndContenedor)
+        {
+            if (!adoptadas.TryGetValue(hwndVentana, out var estado))
+                return false;
+
+            SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales);
+            SetParent(hwndVentana, estado.PadreOriginal);
+            SetWindowPos(hwndVentana, IntPtr.Zero,
+                estado.X, estado.Y, estado.Ancho, estado.Alto,
+                SWP_NOZORDER | SWP_FRAMECHANGED);
+
+            if (hwndContenedor != IntPtr.Zero)
+                InvalidateRect(hwndContenedor, IntPtr.Zero, true);
+
+            // Sacar de la colección y volver a persistir el estado (ya sin esta).
+            adoptadas.Remove(hwndVentana);
+            PersistirTodo();
 
             return true;
         }
 
         /// <summary>
-        /// Devuelve la ventana adoptada a su estado original: la saca del contenedor,
-        /// le restaura estilos, padre y posición. La regla de oro cerrada.
+        /// Devuelve TODAS las ventanas adoptadas. Útil para el cierre limpio
+        /// de OneBlack (soltar todo antes de salir).
         /// </summary>
-        public bool Devolver(IntPtr hwndContenedor)
+        public void DevolverTodas(IntPtr hwndContenedor)
         {
-            if (hwndAdoptada == IntPtr.Zero || estadoGuardado == null)
-                return false;
+            // ToList() para poder modificar el diccionario mientras iteramos.
+            foreach (var hwnd in adoptadas.Keys.ToList())
+                Devolver(hwnd, hwndContenedor);
+        }
 
-            // Restaurar en orden inverso al que adoptamos.
-            SetWindowLong(hwndAdoptada, GWL_STYLE, estadoGuardado.EstilosOriginales);
-            SetParent(hwndAdoptada, estadoGuardado.PadreOriginal);
-            SetWindowPos(hwndAdoptada, IntPtr.Zero,
-                estadoGuardado.X, estadoGuardado.Y,
-                estadoGuardado.Ancho, estadoGuardado.Alto,
-                SWP_NOZORDER | SWP_FRAMECHANGED);
+        /// <summary>
+        /// Vuelca el estado completo de la colección al archivo, de forma atómica.
+        /// Se llama tras cada adopción y cada devolución.
+        /// </summary>
+        private void PersistirTodo()
+        {
+            if (adoptadas.Count == 0)
+            {
+                // No queda nada adoptado: cierre limpio, borrar el archivo.
+                persistencia.Borrar();
+                return;
+            }
 
-            // Limpiar el fantasma: forzar al contenedor a repintarse vacío.
-            if (hwndContenedor != IntPtr.Zero)
-                InvalidateRect(hwndContenedor, IntPtr.Zero, true);
+            var lista = adoptadas.Select(par => new VentanaPersistida
+            {
+                Hwnd = par.Key.ToInt64(),
+                PadreOriginal = par.Value.PadreOriginal.ToInt64(),
+                EstilosOriginales = par.Value.EstilosOriginales,
+                X = par.Value.X,
+                Y = par.Value.Y,
+                Ancho = par.Value.Ancho,
+                Alto = par.Value.Alto
+            }).ToList();
 
-            hwndAdoptada = IntPtr.Zero;
-            estadoGuardado = null;
-            return true;
+            persistencia.Guardar(lista);
         }
     }
 }

@@ -3,5 +3,6 @@
     <Project Path="src/OneBlack.Contenedor/OneBlack.Contenedor.csproj" />
     <Project Path="src/OneBlack.Core.Tests/OneBlack.Core.Tests.csproj" />
     <Project Path="src/OneBlack.Core/OneBlack.Core.csproj" />
+    <Project Path="src/OneBlack.Janitor/OneBlack.Janitor.csproj" />
   </Folder>
 </Solution>

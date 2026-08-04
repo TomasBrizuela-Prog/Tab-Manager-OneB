@@ -1,0 +1,2 @@
+31/07 cerre la app con un Notepad adentro y se cerro, debería salirse de la app y seguir viviendo sin perder cambios
+1/08 el janitor reactivo pierde la carrera: Windows destruye la ventana hija antes de que el janitor la restaure; hay que prevenir la destrucción, no curarla después. Básicamente un crash es mas rápido que la protección anticrash
