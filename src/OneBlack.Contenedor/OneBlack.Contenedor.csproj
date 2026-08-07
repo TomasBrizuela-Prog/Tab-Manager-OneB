@@ -11,5 +11,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
   </PropertyGroup>
-
+	<!-- Referencia al proyecto del janitor SOLO para forzar que se compile
+       y se copie su .exe junto a OneBlack. ReferenceOutputAssembly=false
+       evita que OneBlack intente usarlo como librería (es un .exe aparte). -->
+	<ItemGroup>
+		<ProjectReference Include="..\OneBlack.Janitor\OneBlack.Janitor.csproj">
+			<ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+			<OutputItemType>Content</OutputItemType>
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</ProjectReference>
+	</ItemGroup>
 </Project>

@@ -18,6 +18,8 @@ namespace OneBlack.Core
 
         // Mostramos el nombre lindo en vez del proceso crudo.
         public override string ToString() => $"{Programa.NombreMostrado}: {Titulo}  (HWND {Hwnd})";
+        // Texto para el desplegable de selección: nombre lindo + título.
+        public string TextoParaMostrar => $"{Programa.NombreMostrado}: {Titulo}";
     }
 
     /// <summary>

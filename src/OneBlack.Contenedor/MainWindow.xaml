@@ -7,22 +7,19 @@
     <DockPanel>
         <!-- Barra de botones arriba -->
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal"
-                    Background="#141416" Height="44">
-            <Button x:Name="botonAdoptar" Content="Adoptar Notepad"
-                    Click="botonAdoptar_Click"
-                    Margin="8" Padding="12,4" />
+            Background="#141416" Height="44">
+            <ComboBox x:Name="listaCandidatas"
+              Width="320" Margin="8" VerticalAlignment="Center"
+              DisplayMemberPath="TextoParaMostrar"
+              SelectionChanged="listaCandidatas_SelectionChanged" />
+            <Button x:Name="botonRefrescar" Content="Refrescar"
+            Click="botonRefrescar_Click" Margin="4,8" Padding="12,4" />
+            <Button x:Name="botonAdoptar" Content="Adoptar"
+            Click="botonAdoptar_Click" Margin="4,8" Padding="12,4" />
             <Button x:Name="botonDevolver" Content="Devolver"
-                    Click="botonDevolver_Click"
-                    Margin="8" Padding="12,4" />
-            <Button x:Name="botonListar" Content="Listar ventanas"
-        Click="botonListar_Click"
-        Margin="8" Padding="12,4" />
-            <Button x:Name="botonAdoptarVSCode" Content="Adoptar VS Code"
-        Click="botonAdoptarVSCode_Click"
-        Margin="8" Padding="12,4" />
+            Click="botonDevolver_Click" Margin="4,8" Padding="12,4" />
             <TextBlock x:Name="textoEstado" Text="Listo."
-                       Foreground="#888780" VerticalAlignment="Center"
-                       Margin="12,0" />
+               Foreground="#888780" VerticalAlignment="Center" Margin="12,0" />
         </StackPanel>
 
         <!-- El hueco: acá vive nuestra VentanaAnfitriona -->

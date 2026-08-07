@@ -11,9 +11,7 @@ namespace OneBlack.Contenedor
     {
         private readonly AdoptadorDeVentanas adoptador = new AdoptadorDeVentanas();
 
-        // Recordamos el HWND de la ventana que adoptamos, para poder devolverla.
-        // (En el spike manejamos una sola; el adoptador ya soporta varias.)
-        private IntPtr hwndNotepadAdoptada = IntPtr.Zero;
+       
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
@@ -24,30 +22,38 @@ namespace OneBlack.Contenedor
         {
             InitializeComponent();
             LanzarJanitor();
+            RefrescarCandidatas();
+
+            // Cuando el hueco cambia de tamaño, reajustar las ventanas adoptadas.
+            anfitriona.SizeChanged += (s, e) =>
+            {
+                int ancho = (int)anfitriona.ActualWidth;
+                int alto = (int)anfitriona.ActualHeight;
+                adoptador.ReajustarTamaño(ancho, alto);
+            };
         }
         private void LanzarJanitor()
         {
             try
             {
-                // El PID de nuestro propio proceso (OneBlack), que el janitor va a vigilar.
                 int miPid = Process.GetCurrentProcess().Id;
 
-                // Ruta al .exe del janitor. Asumimos que está en la misma carpeta de salida
-                // que OneBlack (los dos proyectos compilan al mismo Debug/net10.0-windows
-                // cuando corren juntos... pero OJO: en realidad cada proyecto tiene SU carpeta.
-                // Para el spike, construimos la ruta relativa al ejecutable del janitor.)
+                // El janitor vive en la misma carpeta que OneBlack (lo copia el build).
                 string carpetaBase = AppDomain.CurrentDomain.BaseDirectory;
-                string rutaJanitor = Path.Combine(carpetaBase,
-                    "..", "..", "..", "..", "..",
-                    "src", "OneBlack.Janitor", "bin", "Debug", "net10.0-windows",
-                    "OneBlack.Janitor.exe");
+                string rutaJanitor = Path.Combine(carpetaBase, "OneBlack.Janitor.exe");
+
+                if (!File.Exists(rutaJanitor))
+                {
+                    textoEstado.Text = "No encontré el janitor en la carpeta de salida.";
+                    return;
+                }
 
                 var inicio = new ProcessStartInfo
                 {
                     FileName = rutaJanitor,
                     Arguments = miPid.ToString(),
                     UseShellExecute = false,
-                    CreateNoWindow = true   // el janitor corre invisible, sin ventana
+                    CreateNoWindow = true
                 };
 
                 Process.Start(inicio);
@@ -58,124 +64,80 @@ namespace OneBlack.Contenedor
                 textoEstado.Text = $"No pude lanzar el janitor: {ex.Message}";
             }
         }
+        private void botonRefrescar_Click(object sender, RoutedEventArgs e)
+        {
+            RefrescarCandidatas();
+        }
+
+        private void listaCandidatas_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            // Al cambiar la selección, si esa ventana está adoptada, mostrarla
+            // y ocultar las demás. Si no está adoptada, no hacemos nada (aún).
+            if (listaCandidatas.SelectedItem is VentanaCandidata elegida
+                && adoptador.YaEstaAdoptada(elegida.Hwnd))
+            {
+                adoptador.MostrarSolo(elegida.Hwnd);
+                textoEstado.Text = $"Mostrando {elegida.Programa.NombreMostrado}.";
+            }
+        }
+
+        private void RefrescarCandidatas()
+        {
+            var buscador = new BuscadorDeVentanas();
+            var candidatas = buscador.BuscarCandidatas();
+
+            listaCandidatas.ItemsSource = candidatas;
+            if (candidatas.Count > 0)
+                listaCandidatas.SelectedIndex = 0;
+
+            textoEstado.Text = $"{candidatas.Count} ventana(s) adoptable(s).";
+        }
+
         private void botonAdoptar_Click(object sender, RoutedEventArgs e)
         {
-            IntPtr hwndNotepad = adoptador.BuscarNotepad();
-            if (hwndNotepad == IntPtr.Zero)
+            // La candidata elegida en el desplegable.
+            if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
             {
-                textoEstado.Text = "No encontré Notepad. ¿Está abierto?";
+                textoEstado.Text = "Elegí una ventana de la lista primero.";
                 return;
             }
 
-            // Guarda contra doble adopción: si ya la tenemos, avisamos y salimos.
-            if (adoptador.YaEstaAdoptada(hwndNotepad))
+            if (adoptador.YaEstaAdoptada(elegida.Hwnd))
             {
-                textoEstado.Text = "Ese Notepad ya está adoptado.";
+                textoEstado.Text = "Esa ventana ya está adoptada.";
                 return;
             }
 
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            if (hwndContenedor == IntPtr.Zero)
-            {
-                textoEstado.Text = "El contenedor todavía no está listo.";
-                return;
-            }
-
             int ancho = (int)anfitriona.ActualWidth;
             int alto = (int)anfitriona.ActualHeight;
-            bool ok = adoptador.Adoptar(hwndNotepad, hwndContenedor, ancho, alto);
 
+            bool ok = adoptador.Adoptar(elegida.Hwnd, hwndContenedor, ancho, alto);
             if (ok)
             {
-                hwndNotepadAdoptada = hwndNotepad;
-                textoEstado.Text = $"Notepad adoptado (HWND {hwndNotepad}).";
+                adoptador.MostrarSolo(elegida.Hwnd);  // mostrar la recién adoptada, ocultar el resto
+                textoEstado.Text = $"{elegida.Programa.NombreMostrado} adoptado.";
             }
             else
             {
                 textoEstado.Text = "Falló la adopción.";
             }
-            throw new Exception("Crasheo");
         }
 
         private void botonDevolver_Click(object sender, RoutedEventArgs e)
         {
-            if (hwndNotepadAdoptada == IntPtr.Zero)
+            // La candidata elegida es la que devolvemos (si está adoptada).
+            if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
             {
-                textoEstado.Text = "Nada que devolver.";
+                textoEstado.Text = "Elegí la ventana a devolver.";
                 return;
             }
 
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            bool ok = adoptador.Devolver(hwndNotepadAdoptada, hwndContenedor);
-
-            if (ok)
-            {
-                hwndNotepadAdoptada = IntPtr.Zero;
-                textoEstado.Text = "Notepad devuelto a su estado original.";
-            }
-            else
-            {
-                textoEstado.Text = "Nada que devolver.";
-            }
-        }
-        private void botonListar_Click(object sender, RoutedEventArgs e)
-        {
-            var buscador = new BuscadorDeVentanas();
-            var candidatas = buscador.BuscarCandidatas();
-
-            // Por ahora, mostramos la lista en un MessageBox para verla con los ojos.
-            var texto = new System.Text.StringBuilder();
-            texto.AppendLine($"Encontré {candidatas.Count} ventanas candidatas:\n");
-            foreach (var c in candidatas)
-                texto.AppendLine(c.ToString());
-
-            MessageBox.Show(texto.ToString(), "Ventanas adoptables");
-        }
-        private void botonAdoptarVSCode_Click(object sender, RoutedEventArgs e)
-        {
-            // Buscar entre las candidatas la primera que sea VS Code.
-            var buscador = new BuscadorDeVentanas();
-            var candidatas = buscador.BuscarCandidatas();
-
-            var vscode = candidatas.FirstOrDefault(c =>
-                c.NombreProceso.Equals("Code", StringComparison.OrdinalIgnoreCase));
-
-            if (vscode == null)
-            {
-                textoEstado.Text = "No encontré VS Code abierto.";
-                return;
-            }
-
-            if (adoptador.YaEstaAdoptada(vscode.Hwnd))
-            {
-                textoEstado.Text = "Ese VS Code ya está adoptado.";
-                return;
-            }
-
-            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            int ancho = (int)anfitriona.ActualWidth;
-            int alto = (int)anfitriona.ActualHeight;
-
-            bool ok = adoptador.Adoptar(vscode.Hwnd, hwndContenedor, ancho, alto);
-
-            if (ok)
-            {
-                hwndNotepadAdoptada = vscode.Hwnd;
-
-                // SACUDÓN FUERTE: minimizar y restaurar fuerza a Chromium a reconstruir
-                // su superficie de render por completo. 6 = minimizar, 9 = restaurar.
-                const int SW_MINIMIZE = 6;
-                const int SW_RESTORE = 9;
-                ShowWindow(vscode.Hwnd, SW_MINIMIZE);
-                ShowWindow(vscode.Hwnd, SW_RESTORE);
-                MoveWindow(vscode.Hwnd, 0, 0, ancho, alto, true);
-
-                textoEstado.Text = $"VS Code adoptado (HWND {vscode.Hwnd}).";
-            }
-            else
-            {
-                textoEstado.Text = "Falló la adopción de VS Code.";
-            }
+            bool ok = adoptador.Devolver(elegida.Hwnd, hwndContenedor);
+            textoEstado.Text = ok
+                ? $"{elegida.Programa.NombreMostrado} devuelto."
+                : "Esa ventana no estaba adoptada.";
         }
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {

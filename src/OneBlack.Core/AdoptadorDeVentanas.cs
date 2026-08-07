@@ -45,6 +45,12 @@ namespace OneBlack.Core
         [DllImport("user32.dll")]
         private static extern bool InvalidateRect(IntPtr hWnd, IntPtr lpRect, bool bErase);
 
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -109,6 +115,11 @@ namespace OneBlack.Core
             if (!adoptadas.TryGetValue(hwndVentana, out var estado))
                 return false;
 
+            // IMPORTANTE: asegurar que la ventana esté VISIBLE antes de devolverla.
+            // Si estaba oculta por MostrarSolo (SW_HIDE), sin esto quedaría devuelta
+            // pero invisible, y el usuario no la puede recuperar.
+            ShowWindow(hwndVentana, SW_SHOW);
+
             SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales);
             SetParent(hwndVentana, estado.PadreOriginal);
             SetWindowPos(hwndVentana, IntPtr.Zero,
@@ -118,10 +129,8 @@ namespace OneBlack.Core
             if (hwndContenedor != IntPtr.Zero)
                 InvalidateRect(hwndContenedor, IntPtr.Zero, true);
 
-            // Sacar de la colección y volver a persistir el estado (ya sin esta).
             adoptadas.Remove(hwndVentana);
             PersistirTodo();
-
             return true;
         }
 
@@ -134,6 +143,35 @@ namespace OneBlack.Core
             // ToList() para poder modificar el diccionario mientras iteramos.
             foreach (var hwnd in adoptadas.Keys.ToList())
                 Devolver(hwnd, hwndContenedor);
+        }
+        // Constantes para ShowWindow: ocultar y mostrar.
+        private const int SW_HIDE = 0;
+        private const int SW_SHOW = 5;
+
+        /// <summary>
+        /// Muestra SOLO la ventana indicada y oculta todas las demás adoptadas.
+        /// Es la base del cambio de pestaña: una visible, el resto escondidas.
+        /// </summary>
+        public void MostrarSolo(IntPtr hwndVentana)
+        {
+            foreach (var hwnd in adoptadas.Keys)
+            {
+                // La elegida se muestra; todas las demás se ocultan.
+                ShowWindow(hwnd, hwnd == hwndVentana ? SW_SHOW : SW_HIDE);
+            }
+        }
+
+        /// <summary>
+        /// Reajusta el tamaño de todas las ventanas adoptadas al nuevo tamaño del
+        /// contenedor. Se llama cuando el hueco (la VentanaAnfitriona) cambia de tamaño.
+        /// </summary>
+        public void ReajustarTamaño(int ancho, int alto)
+        {
+            foreach (var hwnd in adoptadas.Keys)
+            {
+                // Cada adoptada se reencaja al nuevo tamaño, en la esquina (0,0) del hueco.
+                MoveWindow(hwnd, 0, 0, ancho, alto, true);
+            }
         }
 
         /// <summary>

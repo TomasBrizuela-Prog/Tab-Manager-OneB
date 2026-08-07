@@ -1,2 +1,4 @@
 31/07 cerre la app con un Notepad adentro y se cerro, debería salirse de la app y seguir viviendo sin perder cambios
 1/08 el janitor reactivo pierde la carrera: Windows destruye la ventana hija antes de que el janitor la restaure; hay que prevenir la destrucción, no curarla después. Básicamente un crash es mas rápido que la protección anticrash
+
+6/08 Detectado: tras reparentar VS Code, el teclado no llega a la ventana adoptada (mouse sí). Es el acoplamiento de colas de input entre procesos que advierte la doc de Win32. Solución conocida: AttachThreadInput. PRIORIDAD ALTA: va antes que la persistencia de sesión, porque sin foco de teclado los IDEs adoptados son inusables. El reajuste de tamaño quedó a medias también, retomar
