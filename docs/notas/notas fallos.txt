@@ -2,3 +2,5 @@
 1/08 el janitor reactivo pierde la carrera: Windows destruye la ventana hija antes de que el janitor la restaure; hay que prevenir la destrucción, no curarla después. Básicamente un crash es mas rápido que la protección anticrash
 
 6/08 Detectado: tras reparentar VS Code, el teclado no llega a la ventana adoptada (mouse sí). Es el acoplamiento de colas de input entre procesos que advierte la doc de Win32. Solución conocida: AttachThreadInput. PRIORIDAD ALTA: va antes que la persistencia de sesión, porque sin foco de teclado los IDEs adoptados son inusables. El reajuste de tamaño quedó a medias también, retomar
+
+8/08 Repintado del devolver falla en pantalla completa. Bug intermitente: adoptar+devolver rápido rompe la ventana; esperar unos segundos funciona → condición de carrera entre las operaciones diferidas (Dispatcher.BeginInvoke de encaje/repintado) y el devolver. Causa raíz: adoptar/devolver mezclan trabajo síncrono y diferido sin coordinar. Solución pendiente: estabilizar el ciclo (que adoptar complete todo antes de estar 'listo', que devolver no corra sobre ventana a medio asentar), NO seguir agregando parches de repintado.

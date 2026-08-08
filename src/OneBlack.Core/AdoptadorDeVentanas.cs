@@ -27,8 +27,9 @@ namespace OneBlack.Core
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_FRAMECHANGED = 0x0020;
 
-        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+        [DllImport("user32.dll")]
+        private static extern bool UpdateWindow(IntPtr hWnd);
+
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
         [DllImport("user32.dll", SetLastError = true)]
@@ -54,18 +55,41 @@ namespace OneBlack.Core
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        private const uint WM_ACTIVATE = 0x0006;
+        private const int WA_CLICKACTIVE = 2;
+
+        private IntPtr hwndInputAcoplado = IntPtr.Zero;
+
         // Ahora una COLECCIÓN, no una sola ventana. Clave = HWND de la adoptada.
         private readonly Dictionary<IntPtr, EstadoOriginalVentana> adoptadas
             = new Dictionary<IntPtr, EstadoOriginalVentana>();
 
         private readonly PersistenciaEstado persistencia = new PersistenciaEstado();
 
-        public IntPtr BuscarNotepad() => FindWindow("Notepad", null);
 
         /// <summary>
         /// ¿Está esta ventana ya adoptada? Evita adoptar dos veces la misma.
         /// </summary>
         public bool YaEstaAdoptada(IntPtr hwndVentana) => adoptadas.ContainsKey(hwndVentana);
+
+        /// <summary>
+        /// Los HWND de todas las ventanas actualmente adoptadas.
+        /// Útil para que la UI no las pierda al refrescar la lista de candidatas.
+        /// </summary>
+        public IEnumerable<IntPtr> HwndsAdoptados() => adoptadas.Keys.ToList();
 
         public bool Adoptar(IntPtr hwndVentana, IntPtr hwndContenedor, int ancho, int alto)
         {
@@ -127,8 +151,16 @@ namespace OneBlack.Core
                 SWP_NOZORDER | SWP_FRAMECHANGED);
 
             if (hwndContenedor != IntPtr.Zero)
+            {
                 InvalidateRect(hwndContenedor, IntPtr.Zero, true);
+                UpdateWindow(hwndContenedor);   
+            }
 
+            if (hwndInputAcoplado == hwndVentana)
+            {
+                AcoplarInput(hwndVentana, false);
+                hwndInputAcoplado = IntPtr.Zero;
+            }
             adoptadas.Remove(hwndVentana);
             PersistirTodo();
             return true;
@@ -140,7 +172,12 @@ namespace OneBlack.Core
         /// </summary>
         public void DevolverTodas(IntPtr hwndContenedor)
         {
-            // ToList() para poder modificar el diccionario mientras iteramos.
+            // Primero, asegurar que TODAS estén visibles (algunas pueden estar ocultas
+            // por MostrarSolo). Una ventana oculta no se devuelve bien.
+            foreach (var hwnd in adoptadas.Keys.ToList())
+                ShowWindow(hwnd, SW_SHOW);
+
+            // Ahora sí devolverlas todas.
             foreach (var hwnd in adoptadas.Keys.ToList())
                 Devolver(hwnd, hwndContenedor);
         }
@@ -156,9 +193,49 @@ namespace OneBlack.Core
         {
             foreach (var hwnd in adoptadas.Keys)
             {
-                // La elegida se muestra; todas las demás se ocultan.
                 ShowWindow(hwnd, hwnd == hwndVentana ? SW_SHOW : SW_HIDE);
             }
+
+            // Desacoplar la ventana que estaba acoplada antes (si había otra).
+            if (hwndInputAcoplado != IntPtr.Zero && hwndInputAcoplado != hwndVentana)
+            {
+                AcoplarInput(hwndInputAcoplado, false);
+                hwndInputAcoplado = IntPtr.Zero;
+            }
+
+            // Acoplar el input a la ventana que ahora se muestra.
+            if (hwndVentana != IntPtr.Zero && hwndInputAcoplado != hwndVentana)
+            {
+                AcoplarInput(hwndVentana, true);
+                hwndInputAcoplado = hwndVentana;
+            }
+
+            // Despertar el enrutamiento de foco interno de Chromium: VS Code decide
+            // a qué vista interna (editor/terminal) mandar el teclado según WM_ACTIVATE.
+            // Sin esto, el reparenting rompe ese flujo y el teclado no llega adentro.
+            if (hwndVentana != IntPtr.Zero)
+            {
+                SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
+            }
+        }
+
+        /// <summary>
+        /// Acopla (o desacopla) la cola de input de OneBlack con la de la ventana
+        /// adoptada, para que el teclado fluya a donde el IDE dirija su foco interno
+        /// (editor, terminal, etc.). fAttach=true al adoptar, false al devolver.
+        /// Desacoplar SIEMPRE al devolver: un acople colgado rompe el foco del sistema.
+        /// </summary>
+        private void AcoplarInput(IntPtr hwndVentana, bool acoplar)
+        {
+            uint threadOneBlack = GetCurrentThreadId();
+            uint threadVentana = GetWindowThreadProcessId(hwndVentana, out _);
+
+            if (threadOneBlack == threadVentana)
+                return;
+
+            // Acoplamos el thread de la ventana AL de OneBlack (orden invertido
+            // respecto al intento anterior). La dirección importa en AttachThreadInput.
+            AttachThreadInput(threadVentana, threadOneBlack, acoplar);
         }
 
         /// <summary>
