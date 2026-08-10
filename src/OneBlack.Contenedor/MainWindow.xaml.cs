@@ -20,11 +20,21 @@ namespace OneBlack.Contenedor
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        // Operación de encaje diferida pendiente (la que encola Adoptar).
+        // La guardamos para poder CANCELARLA si Devolver corre antes de que se ejecute
+        private System.Windows.Threading.DispatcherOperation? encajeDiferido;
+
+        // Timer de la salvaguarda de repintado. Lo guardamos para poder frenarlo:
+        // no queremos que siga disparando tras un Devolver, ni que se apilen timers
+        // de adopciones distintas.
+        private System.Windows.Threading.DispatcherTimer? repintadoTimer;
+
         public MainWindow()
         {
             InitializeComponent();
-            LanzarJanitor();
-            RefrescarCandidatas();
+            //LanzarJanitor();
+            //RefrescarCandidatas();
 
             // Cuando el hueco cambia de tamaño, reajustar las ventanas adoptadas.
             anfitriona.SizeChanged += (s, e) =>
@@ -112,10 +122,35 @@ namespace OneBlack.Contenedor
 
             textoEstado.Text = $"{todas.Count} ventana(s): {candidatasAdoptadas.Count} adoptada(s), {libres.Count} libre(s).";
         }
+        /// <summary>
+        /// Salvaguarda de dibujado: tras adoptar, dispara unos pocos repintados espaciados.
+        /// Cubre el caso intermitente en que la ventana (VS Code sobre todo, o cualquiera
+        /// bajo carga) no dibuja tras un adoptar rápido y queda en negro. Barato: 3 disparos
+        /// espaciados y el timer se apaga. Cada disparo es inofensivo si ya se devolvió la
+        /// ventana (el core lo ignora), así que no reintroduce la carrera de adoptar/devolver.
+        /// </summary>
+        private void ProgramarRepintados(IntPtr hwnd)
+        {
+            // Frenar cualquier salvaguarda anterior antes de arrancar otra.
+            repintadoTimer?.Stop();
+
+            int disparos = 0;
+            repintadoTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(120)
+            };
+            repintadoTimer.Tick += (s, e) =>
+            {
+                adoptador.ForzarRepintado(hwnd);   // no-op si ya se devolvió
+                disparos++;
+                if (disparos >= 3)
+                    repintadoTimer?.Stop();
+            };
+            repintadoTimer.Start();
+        }
 
         private void botonAdoptar_Click(object sender, RoutedEventArgs e)
         {
-            // La candidata elegida en el desplegable.
             if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
             {
                 textoEstado.Text = "Elegí una ventana de la lista primero.";
@@ -129,7 +164,7 @@ namespace OneBlack.Contenedor
             }
 
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            var (ancho, alto) = DimensionesFisicas();   // ← píxeles físicos, no lógicos
+            var (ancho, alto) = DimensionesFisicas();
 
             bool ok = adoptador.Adoptar(elegida.Hwnd, hwndContenedor, ancho, alto);
             if (ok)
@@ -137,13 +172,20 @@ namespace OneBlack.Contenedor
                 candidatasAdoptadas.Add(elegida);
                 adoptador.MostrarSolo(elegida.Hwnd);
 
+                // Salvaguarda de dibujado (VS Code / carga alta): unos repintados espaciados.
+                ProgramarRepintados(elegida.Hwnd);
+
                 // El encaje correcto solo ocurre cuando el layout está 100% asentado
-                // (comprobado: solo SizeChanged encaja bien). Forzamos el reajuste en
-                // la fase de Render (más tardía que Loaded), garantizando dimensiones finales.
-                Dispatcher.BeginInvoke(new Action(() =>
+                // (el SizeChanged encaja bien porque ahí el tamaño ya es final; al adoptar,
+                // no). Por eso diferimos a la fase Render, cuando las dimensiones son finales.
+                //
+                // GUARDAMOS la operación para poder cancelarla si Devolver corre antes:
+                // esa carrera (adoptar+devolver rápido) era la que corrompía la ventana.
+                encajeDiferido = Dispatcher.BeginInvoke(new Action(() =>
                 {
                     var (a, al) = DimensionesFisicas();
                     adoptador.ReajustarTamaño(a, al);
+                    encajeDiferido = null;   // ya corrió, no hay nada que cancelar
                 }), System.Windows.Threading.DispatcherPriority.Render);
 
                 textoEstado.Text = $"{elegida.Programa.NombreMostrado} adoptado.";
@@ -153,14 +195,23 @@ namespace OneBlack.Contenedor
                 textoEstado.Text = "Falló la adopción.";
             }
         }
-
         private void botonDevolver_Click(object sender, RoutedEventArgs e)
         {
-            // La candidata elegida es la que devolvemos (si está adoptada).
             if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
             {
                 textoEstado.Text = "Elegí la ventana a devolver.";
                 return;
+            }
+
+            // CLAVE: si hay un encaje diferido pendiente de un Adoptar reciente, lo
+            // CANCELAMOS antes de devolver. Si corriera después del Devolver, haría
+            // SetWindowPos sobre una ventana ya restaurada → corrupción. Esta línea
+            // es la que cierra la condición de carrera de raíz.
+            if (encajeDiferido is { Status: System.Windows.Threading.DispatcherOperationStatus.Pending })
+            {
+                encajeDiferido.Abort();
+                repintadoTimer?.Stop();
+                encajeDiferido = null;
             }
 
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
@@ -168,17 +219,7 @@ namespace OneBlack.Contenedor
             if (ok)
             {
                 candidatasAdoptadas.RemoveAll(c => c.Hwnd == elegida.Hwnd);
-
-                // Refuerzo de repintado (sobre todo en pantalla completa): forzar a la
-                // anfitriona WPF a invalidarse tras un ciclo de layout. WPF repinta su
-                // región de forma más confiable que InvalidateRect en Win32.
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    anfitriona.InvalidateVisual();
-                    var (a, al) = DimensionesFisicas();
-                    adoptador.ReajustarTamaño(a, al);
-                }), System.Windows.Threading.DispatcherPriority.Render);
-
+                anfitriona.InvalidateVisual();
                 textoEstado.Text = $"{elegida.Programa.NombreMostrado} devuelto.";
             }
             else

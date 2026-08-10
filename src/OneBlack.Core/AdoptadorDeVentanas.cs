@@ -68,6 +68,20 @@ namespace OneBlack.Core
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll")]
+        private static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+
+        // Flags de SetWindowPos que faltaban para el latigazo (no mover, no activar).
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
+
+        // Flags de RedrawWindow: invalidar + repintar YA + alcanzar ventanas hijas.
+        // RDW_ALLCHILDREN es clave: llega a las ventanas internas de Chromium, no solo
+        // a la top-level. Por eso es más contundente que InvalidateRect.
+        private const uint RDW_INVALIDATE = 0x0001;
+        private const uint RDW_UPDATENOW = 0x0100;
+        private const uint RDW_ALLCHILDREN = 0x0080;
+
         private const uint WM_ACTIVATE = 0x0006;
         private const int WA_CLICKACTIVE = 2;
 
@@ -105,7 +119,12 @@ namespace OneBlack.Core
             var estado = new EstadoOriginalVentana
             {
                 PadreOriginal = GetDesktopWindow(),
-                EstilosOriginales = GetWindowLong(hwndVentana, GWL_STYLE),
+                // Saneamos: NUNCA guardamos WS_CHILD como estilo "original". Una app top-level
+                // legítima no vuelve siendo hija. Si una devolución previa quedó incompleta y la
+                // ventana conservó WS_CHILD, re-adoptarla capturaría ese WS_CHILD y lo perpetuaría
+                // (al devolver la dejaríamos hija del escritorio = invisible/inutilizable).
+                // Strippearlo acá corta esa cadena de corrupción de raíz.
+                EstilosOriginales = GetWindowLong(hwndVentana, GWL_STYLE) & ~WS_CHILD,
                 X = rect.Left,
                 Y = rect.Top,
                 Ancho = rect.Right - rect.Left,
@@ -144,7 +163,11 @@ namespace OneBlack.Core
             // pero invisible, y el usuario no la puede recuperar.
             ShowWindow(hwndVentana, SW_SHOW);
 
-            SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales);
+            // Doble seguro: restauramos los estilos originales y, pase lo que pase, nos
+            // aseguramos de que WS_CHILD quede APAGADO. Aunque el estado guardado viniera
+            // sucio (p.ej. una entrada persistida de antes de este fix), la ventana vuelve
+            // al escritorio como top-level sana, no como hija huérfana invisible.
+            SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales & ~WS_CHILD);
             SetParent(hwndVentana, estado.PadreOriginal);
             SetWindowPos(hwndVentana, IntPtr.Zero,
                 estado.X, estado.Y, estado.Ancho, estado.Alto,
@@ -217,6 +240,12 @@ namespace OneBlack.Core
             {
                 SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
             }
+
+            // Latigazo de repintado al mostrar: cubre el tab-switch que dejaba negra
+            // la ventana (show + activate no despiertan el render de Chromium; el
+            // resize interno de ForzarRepintado sí).
+            ForzarRepintado(hwndVentana);
+        
         }
 
         /// <summary>
@@ -249,6 +278,43 @@ namespace OneBlack.Core
                 // Cada adoptada se reencaja al nuevo tamaño, en la esquina (0,0) del hueco.
                 MoveWindow(hwnd, 0, 0, ancho, alto, true);
             }
+        }
+
+        /// <summary>
+        /// Salvaguarda de dibujado. Fuerza a una ventana adoptada a repintar su contenido.
+        /// Existe porque VS Code (Chromium) —y ocasionalmente cualquier ventana bajo carga—
+        /// a veces NO repinta tras un adoptar/mostrar rápido y queda en negro con el frame viejo.
+        ///
+        /// Técnica: un "latigazo" de tamaño (encoger 1px y volver). El WM_SIZE resultante
+        /// obliga a Chromium a recomponer su superficie de render —cosa que ni SW_SHOW ni
+        /// WM_ACTIVATE logran—. Es imperceptible (1px, sin mover, sin activar, sin tocar Z).
+        ///
+        /// Es race-safe A PROPÓSITO: si la ventana ya fue devuelta (p.ej. un reintento
+        /// diferido que llegó tarde), no hace nada. Así los reintentos son inofensivos y
+        /// nunca corren SetWindowPos sobre una ventana ya restaurada.
+        /// </summary>
+        public void ForzarRepintado(IntPtr hwndVentana)
+        {
+            // Si ya no la gestionamos, ignorar. Esto es lo que hace seguros los reintentos.
+            if (!adoptadas.ContainsKey(hwndVentana))
+                return;
+
+            // La adoptada ocupa todo el hueco: tomamos su tamaño actual como referencia.
+            GetWindowRect(hwndVentana, out RECT r);
+            int ancho = r.Right - r.Left;
+            int alto = r.Bottom - r.Top;
+            if (ancho <= 1 || alto <= 1)
+                return;
+
+            // Latigazo: -1px y volver. Dispara el WM_SIZE que despierta el render.
+            SetWindowPos(hwndVentana, IntPtr.Zero, 0, 0, ancho - 1, alto,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hwndVentana, IntPtr.Zero, 0, 0, ancho, alto,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+            // Repintado inmediato, alcanzando también las ventanas hijas internas de Chromium.
+            RedrawWindow(hwndVentana, IntPtr.Zero, IntPtr.Zero,
+                RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         }
 
         /// <summary>
