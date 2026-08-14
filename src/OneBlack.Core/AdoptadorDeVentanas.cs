@@ -52,6 +52,12 @@ namespace OneBlack.Core
         [DllImport("user32.dll")]
         private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
+        // Chequeo de validez de un HWND. Devuelve false si la ventana ya no existe
+        // (la app la destruyó, el usuario mató el proceso, etc.). Es la base de la
+        // salvaguarda: nunca operamos Win32 sobre un handle muerto.
+        [DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr hWnd);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -110,21 +116,22 @@ namespace OneBlack.Core
             if (hwndVentana == IntPtr.Zero || hwndContenedor == IntPtr.Zero)
                 return false;
 
+            // Salvaguarda: no adoptar una ventana que ya no existe (la candidata
+            // pudo haberse cerrado entre que se enumeró y que se tocó Adoptar).
+            if (!IsWindow(hwndVentana))
+                return false;
+
             // Guarda contra doble adopción: si ya la tenemos, no la re-procesamos.
             if (adoptadas.ContainsKey(hwndVentana))
                 return false;
 
-            // 1. GUARDAR ANTES DE TOCAR.
+            // 1. GUARDAR ANTES DE TOCAR. Guardamos los estilos EXACTOS, sin tocar
+            //    ningún bit: la regla de oro es restaurar idéntico a como estaba.
             GetWindowRect(hwndVentana, out RECT rect);
             var estado = new EstadoOriginalVentana
             {
                 PadreOriginal = GetDesktopWindow(),
-                // Saneamos: NUNCA guardamos WS_CHILD como estilo "original". Una app top-level
-                // legítima no vuelve siendo hija. Si una devolución previa quedó incompleta y la
-                // ventana conservó WS_CHILD, re-adoptarla capturaría ese WS_CHILD y lo perpetuaría
-                // (al devolver la dejaríamos hija del escritorio = invisible/inutilizable).
-                // Strippearlo acá corta esa cadena de corrupción de raíz.
-                EstilosOriginales = GetWindowLong(hwndVentana, GWL_STYLE) & ~WS_CHILD,
+                EstilosOriginales = GetWindowLong(hwndVentana, GWL_STYLE),
                 X = rect.Left,
                 Y = rect.Top,
                 Ancho = rect.Right - rect.Left,
@@ -158,16 +165,24 @@ namespace OneBlack.Core
             if (!adoptadas.TryGetValue(hwndVentana, out var estado))
                 return false;
 
+            // SALVAGUARDA: si la ventana ya no existe (la app la destruyó mientras
+            // estaba adoptada —caso WinUI que recrea sus ventanas—, o el usuario mató
+            // el proceso), no hay handle vivo sobre el cual operar. Aplicar Win32 sobre
+            // un handle muerto deja basura y estado inconsistente. En vez de eso,
+            // limpiamos nuestro estado interno con dignidad y salimos.
+            if (!IsWindow(hwndVentana))
+            {
+                LimpiarAdoptada(hwndVentana);
+                return false;
+            }
+
             // IMPORTANTE: asegurar que la ventana esté VISIBLE antes de devolverla.
             // Si estaba oculta por MostrarSolo (SW_HIDE), sin esto quedaría devuelta
             // pero invisible, y el usuario no la puede recuperar.
             ShowWindow(hwndVentana, SW_SHOW);
 
-            // Doble seguro: restauramos los estilos originales y, pase lo que pase, nos
-            // aseguramos de que WS_CHILD quede APAGADO. Aunque el estado guardado viniera
-            // sucio (p.ej. una entrada persistida de antes de este fix), la ventana vuelve
-            // al escritorio como top-level sana, no como hija huérfana invisible.
-            SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales & ~WS_CHILD);
+            // Restauramos EXACTAMENTE los estilos guardados (regla de oro: idéntico).
+            SetWindowLong(hwndVentana, GWL_STYLE, estado.EstilosOriginales);
             SetParent(hwndVentana, estado.PadreOriginal);
             SetWindowPos(hwndVentana, IntPtr.Zero,
                 estado.X, estado.Y, estado.Ancho, estado.Alto,
@@ -176,7 +191,7 @@ namespace OneBlack.Core
             if (hwndContenedor != IntPtr.Zero)
             {
                 InvalidateRect(hwndContenedor, IntPtr.Zero, true);
-                UpdateWindow(hwndContenedor);   
+                UpdateWindow(hwndContenedor);
             }
 
             if (hwndInputAcoplado == hwndVentana)
@@ -190,17 +205,37 @@ namespace OneBlack.Core
         }
 
         /// <summary>
+        /// Limpia el estado interno de una ventana adoptada que ya no se puede operar
+        /// (handle muerto). No hace Win32 sobre el handle: solo suelta nuestras
+        /// referencias y re-persiste. Así OneBlack no queda con entradas fantasma.
+        /// </summary>
+        private void LimpiarAdoptada(IntPtr hwndVentana)
+        {
+            // Si teníamos el input acoplado a esta ventana muerta, soltamos la
+            // referencia sin intentar AttachThreadInput(false): el thread de la
+            // ventana puede ya no existir y la llamada no tendría sentido.
+            if (hwndInputAcoplado == hwndVentana)
+                hwndInputAcoplado = IntPtr.Zero;
+
+            adoptadas.Remove(hwndVentana);
+            PersistirTodo();
+        }
+
+        /// <summary>
         /// Devuelve TODAS las ventanas adoptadas. Útil para el cierre limpio
         /// de OneBlack (soltar todo antes de salir).
         /// </summary>
         public void DevolverTodas(IntPtr hwndContenedor)
         {
-            // Primero, asegurar que TODAS estén visibles (algunas pueden estar ocultas
-            // por MostrarSolo). Una ventana oculta no se devuelve bien.
+            // Primero, asegurar que TODAS las vivas estén visibles (algunas pueden
+            // estar ocultas por MostrarSolo). Una ventana oculta no se devuelve bien.
             foreach (var hwnd in adoptadas.Keys.ToList())
-                ShowWindow(hwnd, SW_SHOW);
+                if (IsWindow(hwnd))
+                    ShowWindow(hwnd, SW_SHOW);
 
-            // Ahora sí devolverlas todas.
+            // Ahora sí devolverlas todas. Devolver ya maneja internamente el caso
+            // de un handle muerto (limpia sin operar), así que es seguro llamarlo
+            // para todas sin chequear acá.
             foreach (var hwnd in adoptadas.Keys.ToList())
                 Devolver(hwnd, hwndContenedor);
         }
@@ -216,6 +251,10 @@ namespace OneBlack.Core
         {
             foreach (var hwnd in adoptadas.Keys)
             {
+                // Saltear handles muertos: ShowWindow sobre uno no tiene efecto útil.
+                if (!IsWindow(hwnd))
+                    continue;
+
                 ShowWindow(hwnd, hwnd == hwndVentana ? SW_SHOW : SW_HIDE);
             }
 
@@ -226,8 +265,12 @@ namespace OneBlack.Core
                 hwndInputAcoplado = IntPtr.Zero;
             }
 
+            // Si la ventana pedida no existe, no seguimos con acople/activate/repintado.
+            if (hwndVentana == IntPtr.Zero || !IsWindow(hwndVentana))
+                return;
+
             // Acoplar el input a la ventana que ahora se muestra.
-            if (hwndVentana != IntPtr.Zero && hwndInputAcoplado != hwndVentana)
+            if (hwndInputAcoplado != hwndVentana)
             {
                 AcoplarInput(hwndVentana, true);
                 hwndInputAcoplado = hwndVentana;
@@ -236,16 +279,12 @@ namespace OneBlack.Core
             // Despertar el enrutamiento de foco interno de Chromium: VS Code decide
             // a qué vista interna (editor/terminal) mandar el teclado según WM_ACTIVATE.
             // Sin esto, el reparenting rompe ese flujo y el teclado no llega adentro.
-            if (hwndVentana != IntPtr.Zero)
-            {
-                SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
-            }
+            SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
 
             // Latigazo de repintado al mostrar: cubre el tab-switch que dejaba negra
             // la ventana (show + activate no despiertan el render de Chromium; el
             // resize interno de ForzarRepintado sí).
             ForzarRepintado(hwndVentana);
-        
         }
 
         /// <summary>
@@ -275,6 +314,10 @@ namespace OneBlack.Core
         {
             foreach (var hwnd in adoptadas.Keys)
             {
+                // Saltear handles muertos: MoveWindow sobre uno no tiene efecto.
+                if (!IsWindow(hwnd))
+                    continue;
+
                 // Cada adoptada se reencaja al nuevo tamaño, en la esquina (0,0) del hueco.
                 MoveWindow(hwnd, 0, 0, ancho, alto, true);
             }
@@ -297,6 +340,10 @@ namespace OneBlack.Core
         {
             // Si ya no la gestionamos, ignorar. Esto es lo que hace seguros los reintentos.
             if (!adoptadas.ContainsKey(hwndVentana))
+                return;
+
+            // Salvaguarda extra: si el handle murió, no operamos sobre él.
+            if (!IsWindow(hwndVentana))
                 return;
 
             // La adoptada ocupa todo el hueco: tomamos su tamaño actual como referencia.
