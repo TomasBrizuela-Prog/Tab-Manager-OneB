@@ -4,6 +4,75 @@
              xmlns:local="clr-namespace:OneBlack.Contenedor"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+
+        <!-- ===== Paleta Terminal Neón (traducida de los tokens :root del mockup) ===== -->
+        <!-- Superficies -->
+        <SolidColorBrush x:Key="Bg"        Color="#07070A"/>
+        <SolidColorBrush x:Key="App"       Color="#08080B"/>
+        <SolidColorBrush x:Key="Chrome"    Color="#0B0B0F"/>
+        <SolidColorBrush x:Key="Panel"     Color="#0C0C11"/>
+        <SolidColorBrush x:Key="PanelFoot" Color="#0E0E14"/>
+        <SolidColorBrush x:Key="CodeBg"    Color="#0A0A0E"/>
+
+        <!-- Bordes -->
+        <SolidColorBrush x:Key="Line"      Color="#1B1A23"/>
+        <SolidColorBrush x:Key="LineSoft"  Color="#17161E"/>
+        <SolidColorBrush x:Key="LineFaint" Color="#1C1A24"/>
+
+        <!-- Texto -->
+        <SolidColorBrush x:Key="Fg"    Color="#E7E3F0"/>
+        <SolidColorBrush x:Key="Fg2"   Color="#D4D0DD"/>
+        <SolidColorBrush x:Key="Fg3"   Color="#A9A4B8"/>
+        <SolidColorBrush x:Key="Dim"   Color="#8A849C"/>
+        <SolidColorBrush x:Key="Faint" Color="#4A4655"/>
+        <SolidColorBrush x:Key="Ghost" Color="#3F3B4A"/>
+
+        <!-- Identidad -->
+        <SolidColorBrush x:Key="Accent"   Color="#A97BF0"/>
+        <SolidColorBrush x:Key="AccentBg" Color="#1AA97BF0"/>
+        <!-- ~10% alpha -->
+        <SolidColorBrush x:Key="TabBg"    Color="#15121F"/>
+        <SolidColorBrush x:Key="TabEdge"  Color="#282239"/>
+        <SolidColorBrush x:Key="Data"     Color="#58D5CF"/>
+        <SolidColorBrush x:Key="Off"      Color="#332F3D"/>
+
+        <!-- ===== Estilo base de pestaña ===== -->
+        <Style x:Key="TabButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource Dim}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#111017"/>
+                                <Setter Property="Foreground" Value="{StaticResource Fg2}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Estilo de ítem de sidebar -->
+        <Style x:Key="SideItem" TargetType="Button" BasedOn="{StaticResource TabButton}">
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
     </Application.Resources>
 </Application>

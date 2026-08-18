@@ -45,7 +45,7 @@ namespace OneBlack.Core
         private static readonly List<ProgramaSoportado> soportados = new()
         {
             new ProgramaSoportado("Code",    "Visual Studio Code", CategoriaPrograma.Ide,    "code"),
-            new ProgramaSoportado("Notepad", "Bloc de notas",      CategoriaPrograma.Editor, "notepad"),
+            //new ProgramaSoportado("Notepad", "Bloc de notas",      CategoriaPrograma.Editor, "notepad"),
 
             // Ejemplos para el futuro (comentados hasta probarlos):
             // new ProgramaSoportado("idea64",    "IntelliJ IDEA", CategoriaPrograma.Ide, "idea64"),
