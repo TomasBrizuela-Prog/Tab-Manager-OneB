@@ -12,49 +12,61 @@
             <!-- titlebar -->
             <RowDefinition Height="*"/>
             <!-- cuerpo -->
-            <RowDefinition Height="32"/>
-            <!-- statusbar -->
+            <RowDefinition Height="28"/>
+            <!-- statusbar (más fina, como el modelo) -->
         </Grid.RowDefinitions>
 
-        <!-- ===== TITLEBAR: pestañas ===== -->
+        <!-- ===== TITLEBAR: pestañas + acciones ===== -->
         <Border Grid.Row="0" Background="{StaticResource Chrome}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0">
+            <Grid Margin="14,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- pestañas -->
+                    <ColumnDefinition Width="*"/>
+                    <!-- espacio flexible -->
+                    <ColumnDefinition Width="Auto"/>
+                    <!-- acción provisoria + controles -->
+                </Grid.ColumnDefinitions>
 
-                <!-- Pestaña Cockpit (activa) -->
-                <Button Style="{StaticResource TabButton}"
-                        Background="{StaticResource TabBg}"
-                        BorderBrush="{StaticResource TabEdge}"
-                        Foreground="{StaticResource Fg}">
-                    <StackPanel Orientation="Horizontal">
-                        <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
-                                 VerticalAlignment="Center" Margin="0,0,9,0"/>
-                        <TextBlock Text="Cockpit" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
+                <!-- Pestañas (hoy solo Cockpit; las de IDE serán dinámicas en la Capa 2) -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
 
-                <!-- ===== ANDAMIAJE TEMPORAL: controles del spike ===== -->
-                <!-- Mantenemos adoptar/devolver acá hasta que las pestañas reales
-                     tomen esa función. Es transitorio, se saca en la próxima rebanada. -->
-                <ComboBox x:Name="listaCandidatas"
-                          Width="240" Margin="12,0,4,0" VerticalAlignment="Center"
-                          DisplayMemberPath="TextoParaMostrar"
-                          SelectionChanged="listaCandidatas_SelectionChanged"/>
-                <Button x:Name="botonRefrescar" Content="Refrescar"
-                        Click="botonRefrescar_Click" Margin="2,0" Padding="8,4"/>
-                <Button x:Name="botonAdoptar" Content="Adoptar"
-                        Click="botonAdoptar_Click" Margin="2,0" Padding="8,4"/>
-                <Button x:Name="botonDevolver" Content="Devolver"
-                        Click="botonDevolver_Click" Margin="2,0" Padding="8,4"/>
-                <!-- ===== FIN ANDAMIAJE ===== -->
+                    <!-- Pestaña Cockpit (activa) -->
+                    <Button Style="{StaticResource TabButton}"
+                            Background="{StaticResource TabBg}"
+                            BorderBrush="{StaticResource TabEdge}"
+                            Foreground="{StaticResource Fg}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
+                                     VerticalAlignment="Center" Margin="0,0,9,0"/>
+                            <TextBlock Text="Cockpit" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
 
-            </StackPanel>
+                    <!-- Botón "+" para agregar/adoptar ventana (Capa 2: abrirá el selector) -->
+                    <Button x:Name="botonAgregar" Style="{StaticResource TabButton}"
+                            Content="+" FontSize="16" Padding="10,0"
+                            Foreground="{StaticResource Dim}"
+                            Click="botonAgregar_Click"
+                            ToolTip="Agregar ventana (próximamente)"/>
+                </StackPanel>
+
+                <!-- Acción provisoria (se saca cuando el "+" funcione) + controles de ventana -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- PROVISORIO: lanzar proyecto de prueba, para seguir testeando. -->
+                    <Button Content="▸ prueba" Style="{StaticResource TabButton}"
+                            Foreground="{StaticResource Dim}"
+                            Click="botonProyectoPrueba_Click"
+                            ToolTip="Lanzar proyecto de prueba (provisorio)"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- ===== CUERPO: sidebar + hueco ===== -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="212"/>
+                <ColumnDefinition x:Name="colSidebar" Width="212"/>
                 <!-- sidebar -->
                 <ColumnDefinition Width="*"/>
                 <!-- área central (hueco) -->
@@ -63,27 +75,52 @@
             <!-- SIDEBAR de identidad -->
             <Border Grid.Column="0" Background="{StaticResource Chrome}"
                     BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
-                <StackPanel Margin="10,16">
+                <DockPanel Margin="10,16,10,12">
 
-                    <!-- Cabecera: logo + wordmark -->
-                    <StackPanel Orientation="Horizontal" Margin="6,0,6,18">
-                        <Border Width="20" Height="20" CornerRadius="5"
-                                Background="{StaticResource Accent}" Margin="0,0,10,0"/>
-                        <TextBlock Text="OneBlack" Foreground="{StaticResource Fg}"
-                                   FontSize="13" FontFamily="Consolas"
+                    <!-- Cabecera: logo + wordmark + toggle plegar -->
+                    <Grid DockPanel.Dock="Top" Margin="6,0,6,18">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                            <Border Width="20" Height="20" CornerRadius="5"
+                                    Background="{StaticResource Accent}" Margin="0,0,10,0"/>
+                            <TextBlock Text="OneBlack" Foreground="{StaticResource Fg}"
+                                       FontSize="13" FontFamily="Consolas"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <!-- Toggle para plegar la sidebar (Capa 2: plegado real a riel) -->
+                        <Button x:Name="botonPlegar" Content="«"
+                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Style="{StaticResource TabButton}"
+                                Foreground="{StaticResource Dim}" Padding="6,0"
+                                Click="botonPlegar_Click"
+                                ToolTip="Plegar panel (próximamente)"/>
+                    </Grid>
+
+                    <!-- Pie: estado del hub (queda abajo) -->
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                                Margin="6,0" VerticalAlignment="Bottom">
+                        <Ellipse Width="5" Height="5" Fill="{StaticResource Data}"
+                                 VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="one-hub" Foreground="{StaticResource Faint}"
+                                   FontFamily="Consolas" FontSize="11"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <!-- Grupo ESPACIO -->
-                    <TextBlock Text="ESPACIO" Foreground="{StaticResource Ghost}"
-                               FontFamily="Consolas" FontSize="10" Margin="9,0,0,8"/>
-                    <Button Style="{StaticResource SideItem}" Content="Cockpit"
-                            Foreground="{StaticResource Fg}" Background="{StaticResource AccentBg}"/>
-                    <Button Style="{StaticResource SideItem}" Content="Proyectos"/>
-                    <Button Style="{StaticResource SideItem}" Content="Git"/>
-                    <Button Style="{StaticResource SideItem}" Content="Ajustes"/>
+                    <!-- Navegación de espacios -->
+                    <StackPanel>
+                        <TextBlock Text="ESPACIO" Foreground="{StaticResource Ghost}"
+                                   FontFamily="Consolas" FontSize="10" Margin="9,0,0,8"/>
+                        <Button Style="{StaticResource SideItem}" Content="Cockpit"
+                                Foreground="{StaticResource Fg}" Background="{StaticResource AccentBg}"
+                                Click="navCockpit_Click"/>
+                        <Button Style="{StaticResource SideItem}" Content="Proyectos"
+                                Click="navProyectos_Click"/>
+                        <Button Style="{StaticResource SideItem}" Content="Git"
+                                Click="navGit_Click"/>
+                        <Button Style="{StaticResource SideItem}" Content="Ajustes"
+                                Click="navAjustes_Click"/>
+                    </StackPanel>
 
-                </StackPanel>
+                </DockPanel>
             </Border>
 
             <!-- ÁREA CENTRAL: el hueco del reparenting.
@@ -101,9 +138,15 @@
         <Border Grid.Row="2" Background="{StaticResource Chrome}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0">
+                <!-- Info estática del modelo -->
+                <TextBlock Text="feature/reservas" Foreground="{StaticResource Dim}"
+                           FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
+                <TextBlock Text="  ·  " Foreground="{StaticResource Faint}"
+                           FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
+                <!-- textoEstado: mensajes reales que el code-behind ya escribe -->
                 <TextBlock x:Name="textoEstado" Text="Listo."
                            Foreground="{StaticResource Dim}"
-                           FontFamily="Consolas" FontSize="11.5"
+                           FontFamily="Consolas" FontSize="11"
                            VerticalAlignment="Center"/>
             </StackPanel>
         </Border>

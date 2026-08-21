@@ -77,6 +77,50 @@ namespace OneBlack.Core
         [DllImport("user32.dll")]
         private static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
 
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetFocus(IntPtr hWnd);
+
+        // ===== Subclasificación (para clavar la ventana adoptada) =====
+        // SetWindowSubclass inserta nuestra función en la cadena de mensajes de la
+        // ventana; DefSubclassProc pasa al siguiente en la cadena; RemoveWindowSubclass
+        // la quita. Viven en comctl32.dll. Es la vía SEGURA de subclasificar (a
+        // diferencia del viejo SetWindowLongPtr, que es frágil entre procesos).
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass,
+            IntPtr uIdSubclass, IntPtr dwRefData);
+
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern bool RemoveWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass,
+            IntPtr uIdSubclass);
+
+        [DllImport("comctl32.dll")]
+        private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+        // Firma de la función de subclase que Windows llamará por cada mensaje.
+        private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam,
+            IntPtr lParam, IntPtr uIdSubclass, IntPtr dwRefData);
+
+        // La estructura que viaja en WM_WINDOWPOSCHANGING: describe el cambio de
+        // posición/tamaño que Windows ESTÁ POR aplicar. Si le encendemos los flags
+        // NOMOVE/NOSIZE, Windows descarta el cambio → la ventana queda clavada.
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WINDOWPOS
+        {
+            public IntPtr hwnd;
+            public IntPtr hwndInsertAfter;
+            public int x, y, cx, cy;
+            public uint flags;
+        }
+
+        private const uint WM_WINDOWPOSCHANGING = 0x0046;
+        private const uint SWP_NOSIZE = 0x0001;
+        // (SWP_NOMOVE ya está declarado más abajo.)
+
+        // ===== Fin subclasificación =====
+
         // Flags de SetWindowPos que faltaban para el latigazo (no mover, no activar).
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -97,6 +141,12 @@ namespace OneBlack.Core
         private readonly Dictionary<IntPtr, EstadoOriginalVentana> adoptadas
             = new Dictionary<IntPtr, EstadoOriginalVentana>();
 
+        // Guardamos el delegate de subclase POR VENTANA. Es OBLIGATORIO conservar la
+        // referencia viva: si el GC recolecta el delegate mientras Windows aún lo usa,
+        // el proceso crashea. Mismo motivo por el que VentanaAnfitriona guarda su wndProc.
+        private readonly Dictionary<IntPtr, SubclassProc> subclases
+            = new Dictionary<IntPtr, SubclassProc>();
+
         private readonly PersistenciaEstado persistencia = new PersistenciaEstado();
 
 
@@ -111,6 +161,35 @@ namespace OneBlack.Core
         /// </summary>
         public IEnumerable<IntPtr> HwndsAdoptados() => adoptadas.Keys.ToList();
 
+        /// <summary>
+        /// Reaplica SOLO el foco de teclado a una ventana ya adoptada y visible, sin tocar
+        /// show/hide, encaje ni repintado. Es la versión quirúrgica para recuperar el teclado
+        /// tras algo que robó el foco (una notificación del IDE), sin los efectos secundarios
+        /// de MostrarSolo (que reencaja y repinta, y por eso no sirve para disparar seguido).
+        /// </summary>
+        public void ReaplicarFoco(IntPtr hwndVentana)
+        {
+            if (hwndVentana == IntPtr.Zero || !IsWindow(hwndVentana))
+                return;
+            if (!adoptadas.ContainsKey(hwndVentana))
+                return;
+
+            // Asegurar el acople de input a esta ventana (si no estaba acoplada).
+            if (hwndInputAcoplado != hwndVentana)
+            {
+                // Desacoplar la anterior, si había otra.
+                if (hwndInputAcoplado != IntPtr.Zero)
+                    AcoplarInput(hwndInputAcoplado, false);
+
+                AcoplarInput(hwndVentana, true);
+                hwndInputAcoplado = hwndVentana;
+            }
+
+            // Los tres pasos que entregan el foco (mismos que MostrarSolo, sin lo demás).
+            SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
+            SetForegroundWindow(hwndVentana);
+            SetFocus(hwndVentana);
+        }
         public bool Adoptar(IntPtr hwndVentana, IntPtr hwndContenedor, int ancho, int alto)
         {
             if (hwndVentana == IntPtr.Zero || hwndContenedor == IntPtr.Zero)
@@ -153,7 +232,12 @@ namespace OneBlack.Core
             SetWindowPos(hwndVentana, IntPtr.Zero, 0, 0, ancho, alto,
                 SWP_NOZORDER | SWP_FRAMECHANGED);
 
-            // 5. REGISTRAR en la colección y PERSISTIR el estado completo.
+            // 5. CLAVAR: subclasificar para que la ventana no pueda moverse ni
+            //    redimensionarse por su cuenta (ni el usuario, ni VS Code al maximizar
+            //    o notificar). Solo ReajustarTamaño podrá reposicionarla.
+            ClavarVentana(hwndVentana);
+
+            // 6. REGISTRAR en la colección y PERSISTIR el estado completo.
             adoptadas[hwndVentana] = estado;
             PersistirTodo();
 
@@ -175,6 +259,11 @@ namespace OneBlack.Core
                 LimpiarAdoptada(hwndVentana);
                 return false;
             }
+
+            // DESCLAVAR: quitar la subclase ANTES de restaurar. Una subclase colgada
+            // tras devolver dejaría nuestro código corriendo sobre una ventana que ya
+            // no gestionamos (y bloqueándole el movimiento al usuario legítimo).
+            DesclavarVentana(hwndVentana);
 
             // IMPORTANTE: asegurar que la ventana esté VISIBLE antes de devolverla.
             // Si estaba oculta por MostrarSolo (SW_HIDE), sin esto quedaría devuelta
@@ -217,6 +306,11 @@ namespace OneBlack.Core
             if (hwndInputAcoplado == hwndVentana)
                 hwndInputAcoplado = IntPtr.Zero;
 
+            // Soltar el delegate de subclase (no llamamos RemoveWindowSubclass sobre
+            // un handle muerto: no tiene sentido y podría fallar). Basta con soltar
+            // nuestra referencia para que el GC lo recolecte.
+            subclases.Remove(hwndVentana);
+
             adoptadas.Remove(hwndVentana);
             PersistirTodo();
         }
@@ -246,12 +340,13 @@ namespace OneBlack.Core
         /// <summary>
         /// Muestra SOLO la ventana indicada y oculta todas las demás adoptadas.
         /// Es la base del cambio de pestaña: una visible, el resto escondidas.
+        /// Además refuerza el foco de teclado, necesario sobre todo cuando OneBlack
+        /// lanzó la ventana él mismo (nace sin haber sido activada por el usuario).
         /// </summary>
         public void MostrarSolo(IntPtr hwndVentana)
         {
             foreach (var hwnd in adoptadas.Keys)
             {
-                // Saltear handles muertos: ShowWindow sobre uno no tiene efecto útil.
                 if (!IsWindow(hwnd))
                     continue;
 
@@ -265,7 +360,6 @@ namespace OneBlack.Core
                 hwndInputAcoplado = IntPtr.Zero;
             }
 
-            // Si la ventana pedida no existe, no seguimos con acople/activate/repintado.
             if (hwndVentana == IntPtr.Zero || !IsWindow(hwndVentana))
                 return;
 
@@ -276,14 +370,19 @@ namespace OneBlack.Core
                 hwndInputAcoplado = hwndVentana;
             }
 
-            // Despertar el enrutamiento de foco interno de Chromium: VS Code decide
-            // a qué vista interna (editor/terminal) mandar el teclado según WM_ACTIVATE.
-            // Sin esto, el reparenting rompe ese flujo y el teclado no llega adentro.
+            // REFUERZO DE FOCO (clave para ventanas lanzadas por OneBlack):
+            // Una ventana que OneBlack lanzó nunca fue "activada" por el usuario, así que
+            // el SO no la considera foreground y el teclado no llega, por más que las colas
+            // de input estén acopladas. Estos tres pasos la activan de verdad:
+            //   1. WM_ACTIVATE  → despierta el enrutamiento de foco interno de Chromium.
+            //   2. SetForegroundWindow → la marca como la ventana activa a nivel SO.
+            //   3. SetFocus     → le da el foco de teclado explícito (con el input ya acoplado,
+            //                     ahora sí "prende" sobre la ventana correcta).
             SendMessage(hwndVentana, WM_ACTIVATE, new IntPtr(WA_CLICKACTIVE), IntPtr.Zero);
+            SetForegroundWindow(hwndVentana);
+            SetFocus(hwndVentana);
 
-            // Latigazo de repintado al mostrar: cubre el tab-switch que dejaba negra
-            // la ventana (show + activate no despiertan el render de Chromium; el
-            // resize interno de ForzarRepintado sí).
+            // Latigazo de repintado al mostrar (Chromium no repinta ante SW_SHOW/WM_ACTIVATE).
             ForzarRepintado(hwndVentana);
         }
 
@@ -319,6 +418,10 @@ namespace OneBlack.Core
                     continue;
 
                 // Cada adoptada se reencaja al nuevo tamaño, en la esquina (0,0) del hueco.
+                // NOTA: este MoveWindow es NUESTRO reposicionamiento legítimo. La subclase
+                // que clava la ventana solo bloquea WM_WINDOWPOSCHANGING; MoveWindow pasa
+                // por otra vía y sí reposiciona. Por eso el encaje sigue funcionando aunque
+                // la ventana esté "clavada" contra movimientos externos.
                 MoveWindow(hwnd, 0, 0, ancho, alto, true);
             }
         }
@@ -362,6 +465,59 @@ namespace OneBlack.Core
             // Repintado inmediato, alcanzando también las ventanas hijas internas de Chromium.
             RedrawWindow(hwndVentana, IntPtr.Zero, IntPtr.Zero,
                 RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+        }
+
+        /// <summary>
+        /// CLAVA una ventana adoptada: la subclasifica para interceptar sus intentos de
+        /// moverse/redimensionarse y anularlos. Tras esto, la ventana no puede cambiar de
+        /// posición ni tamaño por su cuenta (ni el usuario arrastrándola, ni VS Code al
+        /// maximizar o mostrar una notificación). Solo ReajustarTamaño (vía MoveWindow)
+        /// puede reposicionarla, porque MoveWindow no pasa por el mensaje que bloqueamos.
+        /// </summary>
+        private void ClavarVentana(IntPtr hwndVentana)
+        {
+            // Creamos el delegate y lo GUARDAMOS en el diccionario para que el GC no lo
+            // recolecte mientras Windows lo tenga registrado (crash clásico si se omite).
+            SubclassProc proc = SubclaseClavado;
+            subclases[hwndVentana] = proc;
+            SetWindowSubclass(hwndVentana, proc, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        /// <summary>
+        /// DESCLAVA una ventana: quita la subclase y suelta el delegate. Se llama en
+        /// Devolver, ANTES de restaurar, para que la ventana recupere su libertad de
+        /// movimiento normal al volver al escritorio.
+        /// </summary>
+        private void DesclavarVentana(IntPtr hwndVentana)
+        {
+            if (subclases.TryGetValue(hwndVentana, out var proc))
+            {
+                RemoveWindowSubclass(hwndVentana, proc, IntPtr.Zero);
+                subclases.Remove(hwndVentana);
+            }
+        }
+
+        /// <summary>
+        /// La función de subclase que Windows llama por cada mensaje de la ventana
+        /// adoptada. Solo nos interesa WM_WINDOWPOSCHANGING: cuando la ventana está por
+        /// moverse o redimensionarse, encendemos SWP_NOMOVE|SWP_NOSIZE en la estructura
+        /// WINDOWPOS, y Windows descarta ese cambio → la ventana queda clavada.
+        /// Todos los demás mensajes pasan intactos a la cadena original (DefSubclassProc).
+        /// </summary>
+        private IntPtr SubclaseClavado(IntPtr hWnd, uint uMsg, IntPtr wParam,
+            IntPtr lParam, IntPtr uIdSubclass, IntPtr dwRefData)
+        {
+            if (uMsg == WM_WINDOWPOSCHANGING)
+            {
+                // lParam apunta a una estructura WINDOWPOS. La leemos, le encendemos los
+                // flags que anulan movimiento y tamaño, y la reescribimos en memoria.
+                var pos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
+                pos.flags |= SWP_NOMOVE | SWP_NOSIZE;
+                Marshal.StructureToPtr(pos, lParam, false);
+            }
+
+            // El resto sigue su curso normal por la cadena de mensajes.
+            return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
         /// <summary>

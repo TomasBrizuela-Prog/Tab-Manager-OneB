@@ -25,14 +25,33 @@ namespace OneBlack.Contenedor
         // La guardamos para poder CANCELARLA si Devolver corre antes de que se ejecute
         private System.Windows.Threading.DispatcherOperation? encajeDiferido;
 
+        // Campo que recuerda qué ventana adoptada se está mostrando, para poder
+        // re-enfocarla cuando OneBlack recupere la activación (ej: tras una notificación
+        // del IDE que robó el foco).
+        private IntPtr hwndVisibleActual = IntPtr.Zero;
+
         // Timer de la salvaguarda de repintado. Lo guardamos para poder frenarlo:
         // no queremos que siga disparando tras un Devolver, ni que se apilen timers
         // de adopciones distintas.
         private System.Windows.Threading.DispatcherTimer? repintadoTimer;
 
+        // Timer que mantiene la ventana adoptada clavada en el hueco. Corre suave y
+        // barato mientras hay una ventana visible: si VS Code se desencajó por su cuenta
+        // (arrastrándolo desde su topbar de Chromium, o por el borde), lo repone. Es la
+        // red de seguridad definitiva: no importa CÓMO se movió, si no está encajado, lo
+        // reencaja. Reusa ReajustarTamaño, que ya sabe clavarlo en (0,0).
+        private System.Windows.Threading.DispatcherTimer? clavadoTimer;
         public MainWindow()
         {
             InitializeComponent();
+           
+            // Re-aplicar el foco de teclado a la ventana adoptada cuando:
+            //  (a) OneBlack se activa (Activated), o
+            //  (b) el usuario hace click en cualquier parte de OneBlack (PreviewMouseDown).
+            // El caso (b) es el que cubre la notificación del IDE que roba el foco: apenas
+            // el usuario vuelve a clickear en la app, le devolvemos el teclado al IDE.
+            Activated += (s, e) => ReenfocarVisible();
+            PreviewMouseDown += (s, e) => ReenfocarVisible();
             //LanzarJanitor();
             //RefrescarCandidatas();
 
@@ -42,6 +61,17 @@ namespace OneBlack.Contenedor
                 var (ancho, alto) = DimensionesFisicas();
                 adoptador.ReajustarTamaño(ancho, alto);
             };
+        }
+
+        /// <summary>
+        /// Re-aplica el foco de teclado a la ventana adoptada que está visible.
+        /// Se llama cuando OneBlack recupera actividad (activación o click del usuario),
+        /// para recuperar el teclado tras algo que robó el foco (ej: notificación del IDE).
+        /// </summary>
+        private void ReenfocarVisible()
+        {
+            if (hwndVisibleActual != IntPtr.Zero && adoptador.YaEstaAdoptada(hwndVisibleActual))
+                adoptador.ReaplicarFoco(hwndVisibleActual);   // ← solo foco, no MostrarSolo
         }
         private void LanzarJanitor()
         {
@@ -75,53 +105,10 @@ namespace OneBlack.Contenedor
                 textoEstado.Text = $"No pude lanzar el janitor: {ex.Message}";
             }
         }
-        private void botonRefrescar_Click(object sender, RoutedEventArgs e)
-        {
-            RefrescarCandidatas();
-        }
+     
 
-        private void listaCandidatas_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-        {
-            // Al cambiar la selección, si esa ventana está adoptada, mostrarla
-            // y ocultar las demás. Si no está adoptada, no hacemos nada (aún).
-            if (listaCandidatas.SelectedItem is VentanaCandidata elegida
-                && adoptador.YaEstaAdoptada(elegida.Hwnd))
-            {
-                adoptador.MostrarSolo(elegida.Hwnd);
-                textoEstado.Text = $"Mostrando {elegida.Programa.NombreMostrado}.";
-            }
-        }
+  
 
-        private void RefrescarCandidatas()
-        {
-            var buscador = new BuscadorDeVentanas();
-            var libres = buscador.BuscarCandidatas();
-
-            // Combinar: las ventanas libres (recién enumeradas) + las que ya adoptamos
-            // (que no aparecen en la enumeración porque son hijas de OneBlack).
-            // Evitamos duplicados por HWND.
-            var todas = new List<VentanaCandidata>(candidatasAdoptadas);
-            foreach (var libre in libres)
-            {
-                if (!todas.Any(c => c.Hwnd == libre.Hwnd))
-                    todas.Add(libre);
-            }
-
-            // Preservar la selección actual para no romper la ventana visible.
-            var seleccionActual = listaCandidatas.SelectedItem as VentanaCandidata;
-
-            listaCandidatas.ItemsSource = todas;
-
-            // Restaurar la selección si la ventana sigue en la lista.
-            if (seleccionActual != null)
-            {
-                var reencontrada = todas.FirstOrDefault(c => c.Hwnd == seleccionActual.Hwnd);
-                if (reencontrada != null)
-                    listaCandidatas.SelectedItem = reencontrada;
-            }
-
-            textoEstado.Text = $"{todas.Count} ventana(s): {candidatasAdoptadas.Count} adoptada(s), {libres.Count} libre(s).";
-        }
         /// <summary>
         /// Salvaguarda de dibujado: tras adoptar, dispara unos pocos repintados espaciados.
         /// Cubre el caso intermitente en que la ventana (VS Code sobre todo, o cualquiera
@@ -148,85 +135,102 @@ namespace OneBlack.Contenedor
             };
             repintadoTimer.Start();
         }
-
-        private void botonAdoptar_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Arranca el corrector de posición: cada 500ms reencaja la ventana visible en
+        /// el hueco, por si se desencajó por su cuenta. Barato (un MoveWindow cada medio
+        /// segundo) e imperceptible. Es la red que atrapa todas las vías por las que
+        /// Chromium mueve su ventana, sin pelear contra cada una.
+        /// </summary>
+        private void ArrancarClavado()
         {
-            if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
+            if (clavadoTimer != null) return;   // ya está corriendo
+
+            clavadoTimer = new System.Windows.Threading.DispatcherTimer
             {
-                textoEstado.Text = "Elegí una ventana de la lista primero.";
-                return;
-            }
-
-            if (adoptador.YaEstaAdoptada(elegida.Hwnd))
+                Interval = TimeSpan.FromMilliseconds(200)
+            };
+            clavadoTimer.Tick += (s, e) =>
             {
-                textoEstado.Text = "Esa ventana ya está adoptada.";
-                return;
-            }
-
-            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            var (ancho, alto) = DimensionesFisicas();
-
-            bool ok = adoptador.Adoptar(elegida.Hwnd, hwndContenedor, ancho, alto);
-            if (ok)
-            {
-                candidatasAdoptadas.Add(elegida);
-                adoptador.MostrarSolo(elegida.Hwnd);
-
-                // Salvaguarda de dibujado (VS Code / carga alta): unos repintados espaciados.
-                ProgramarRepintados(elegida.Hwnd);
-
-                // El encaje correcto solo ocurre cuando el layout está 100% asentado
-                // (el SizeChanged encaja bien porque ahí el tamaño ya es final; al adoptar,
-                // no). Por eso diferimos a la fase Render, cuando las dimensiones son finales.
-                //
-                // GUARDAMOS la operación para poder cancelarla si Devolver corre antes:
-                // esa carrera (adoptar+devolver rápido) era la que corrompía la ventana.
-                encajeDiferido = Dispatcher.BeginInvoke(new Action(() =>
+                if (hwndVisibleActual != IntPtr.Zero && adoptador.YaEstaAdoptada(hwndVisibleActual))
                 {
                     var (a, al) = DimensionesFisicas();
-                    adoptador.ReajustarTamaño(a, al);
-                    encajeDiferido = null;   // ya corrió, no hay nada que cancelar
-                }), System.Windows.Threading.DispatcherPriority.Render);
+                    adoptador.ReajustarTamaño(a, al);       // el reencaje sí corre siempre
 
-                textoEstado.Text = $"{elegida.Programa.NombreMostrado} adoptado.";
-            }
-            else
-            {
-                textoEstado.Text = "Falló la adopción.";
-            }
+                    // El foco SOLO se reafirma si OneBlack está en primer plano. Si el usuario
+                    // se fue a otra app, no le robamos el foco de vuelta cada 200ms.
+                    if (this.IsActive)
+                        adoptador.ReaplicarFoco(hwndVisibleActual);
+                }
+            };
+            clavadoTimer.Start();
         }
-        private void botonDevolver_Click(object sender, RoutedEventArgs e)
+
+        /// <summary>Frena el corrector de posición (cuando no hay nada adoptado visible).</summary>
+        private void FrenarClavado()
         {
-            if (listaCandidatas.SelectedItem is not VentanaCandidata elegida)
+            clavadoTimer?.Stop();
+            clavadoTimer = null;
+        }
+     
+        /// <summary>
+        /// Re-aplica el foco de teclado un instante después de adoptar una ventana
+        /// recién lanzada. Necesario porque al lanzar+adoptar en <1s, el thread de
+        /// input del programa todavía no maduró cuando MostrarSolo corre su
+        /// AttachThreadInput, y el teclado no engancha. Re-mostrar cuando ya maduró
+        /// lo resuelve. Un solo disparo diferido alcanza.
+        /// </summary>
+        private void ReaplicarFocoDiferido(IntPtr hwnd)
+        {
+            var timer = new System.Windows.Threading.DispatcherTimer
             {
-                textoEstado.Text = "Elegí la ventana a devolver.";
+                Interval = TimeSpan.FromMilliseconds(600)
+            };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                // Solo si sigue adoptada (pudo haberse devuelto en el ínterin).
+                if (adoptador.YaEstaAdoptada(hwnd))
+                    adoptador.MostrarSolo(hwnd);   // re-corre AttachThreadInput + WM_ACTIVATE
+            };
+            timer.Start();
+        }
+        //prueba
+        private readonly LanzadorDeProgramas lanzador = new LanzadorDeProgramas();
+
+        private async void botonProyectoPrueba_Click(object sender, RoutedEventArgs e)
+        {
+            var vscode = CatalogoDeProgramas.Buscar("Code");
+            if (vscode == null) { textoEstado.Text = "VS Code no está en el catálogo."; return; }
+
+            textoEstado.Text = "Lanzando VS Code…";
+
+            //
+            string carpeta = @"C:\Dev\Tesis\ProyectosPrueba\RECUPERATORIO";
+
+            IntPtr hwnd = await lanzador.LanzarYEsperar(vscode, carpeta);
+            if (hwnd == IntPtr.Zero)
+            {
+                textoEstado.Text = "La ventana no apareció (timeout).";
                 return;
             }
 
-            // CLAVE: si hay un encaje diferido pendiente de un Adoptar reciente, lo
-            // CANCELAMOS antes de devolver. Si corriera después del Devolver, haría
-            // SetWindowPos sobre una ventana ya restaurada → corrupción. Esta línea
-            // es la que cierra la condición de carrera de raíz.
-            if (encajeDiferido is { Status: System.Windows.Threading.DispatcherOperationStatus.Pending })
-            {
-                encajeDiferido.Abort();
-                repintadoTimer?.Stop();
-                encajeDiferido = null;
-            }
-
+            // Apareció: adoptarla, igual que el flujo manual.
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            bool ok = adoptador.Devolver(elegida.Hwnd, hwndContenedor);
-            if (ok)
+            anfitriona.UpdateLayout();
+            var (ancho, alto) = DimensionesFisicas();
+
+            if (adoptador.Adoptar(hwnd, hwndContenedor, ancho, alto))
             {
-                candidatasAdoptadas.RemoveAll(c => c.Hwnd == elegida.Hwnd);
-                anfitriona.InvalidateVisual();
-                textoEstado.Text = $"{elegida.Programa.NombreMostrado} devuelto.";
+                hwndVisibleActual = hwnd;
+                adoptador.MostrarSolo(hwnd);
+                ProgramarRepintados(hwnd);
+                ReaplicarFocoDiferido(hwnd);
+                ArrancarClavado();                 // ← red de seguridad de posición
+                textoEstado.Text = "Proyecto lanzado y adoptado.";
             }
-            else
-            {
-                textoEstado.Text = "Esa ventana no estaba adoptada.";
-            }
+            else textoEstado.Text = "Apareció la ventana pero falló la adopción.";
         }
+
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
             // Cierre ordenado: soltamos todas las ventanas adoptadas ANTES de morir.
@@ -268,6 +272,37 @@ namespace OneBlack.Contenedor
             int anchoFisico = (int)(anchoLogico * escalaX);
             int altoFisico = (int)(altoLogico * escalaY);
             return (anchoFisico, altoFisico);
+        }
+
+
+
+        // ===== Handlers del chrome, cableados en seco (se conectan en su módulo) =====
+
+        // "+" — Capa 2: abrirá el selector de programas para adoptar/lanzar.
+        private void botonAgregar_Click(object sender, RoutedEventArgs e)
+        {
+            textoEstado.Text = "Agregar ventana: próximamente.";
+        }
+
+        // Plegar sidebar — Capa 2: plegado real a riel de 56px.
+        private void botonPlegar_Click(object sender, RoutedEventArgs e)
+        {
+            textoEstado.Text = "Plegar panel: próximamente.";
+        }
+
+        // Navegación de espacios — Capa 2: cambiar la vista central.
+        private void navCockpit_Click(object sender, RoutedEventArgs e) { }
+        private void navProyectos_Click(object sender, RoutedEventArgs e)
+        {
+            textoEstado.Text = "Vista Proyectos: próximamente.";
+        }
+        private void navGit_Click(object sender, RoutedEventArgs e)
+        {
+            textoEstado.Text = "Vista Git: próximamente.";
+        }
+        private void navAjustes_Click(object sender, RoutedEventArgs e)
+        {
+            textoEstado.Text = "Vista Ajustes: próximamente.";
         }
     }
 }

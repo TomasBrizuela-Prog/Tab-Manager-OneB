@@ -40,3 +40,26 @@ Hallazgos de alcance (transversales, material de tesis)
 Firma de código como requisito no-funcional de distribución. Smart App Control (WDAC) bloqueó la carga de OneBlack.Core.dll sin firmar (0x800711C7), de forma no-determinística (por reputación/heurística). Una app de reparenting es indistinguible de malware para los controles de Windows. La firma con certificado de editor verificado (EV, clave en hardware desde 2023) es obligatoria para distribuir a terceros — mismo requisito que productos comerciales como Groupy. Para la tesis: documentar la decisión (ADR) y opcionalmente demostrar el pipeline con certificado autofirmado. DECISIÓN DE FONDO ABIERTA — en análisis.
 Identidad de ventanas en Win32 y límite de soportabilidad. El reparenting por HWND asume que el handle es estable durante la adopción; las apps WinUI lo violan recreando ventanas. Conclusión: el soporte de una app debe validarse por su estabilidad de ventana, no asumirse; y la mitigación correcta para el caso patológico es excluirlo y detectar la invalidación con gracia, no re-seguir la ventana. Saber dónde parar de robustecer es criterio de ingeniería.
 Las apps modernas (Chromium, WinUI) reaccionan al reparenting de formas que las Win32 clásicas no. Patrón transversal: VS Code necesita --disable-gpu (render) y WM_SIZE (repintado); el Notepad WinUI recrea su HWND. El Notepad clásico (Win32 puro) nunca tuvo ninguno de estos problemas. Cada tecnología de UI tiene su propio conjunto de esquinas filosas.
+
+
+18/08
+Foco: primera sesión de trabajo visual — traducción del diseño a la app real, sin tocar el core a propósito (aunque el layout nuevo terminó rozándolo).
+
+Hecho:
+
+Se cerró la exploración de diseño en Claude Design. Dirección final: Terminal Neón + calma navegable de Linear. El mockup pasó por tres estados (denso → vacío → estructurado) hasta converger.
+Rebanada visual 1 implementada: layout nuevo en WPF — sidebar de identidad (logo + navegación de espacios), titlebar de pestañas, statusbar, y el hueco del reparenting enmarcado en el área central. Tokens Terminal Neón traducidos a recursos de WPF (App.xaml). Andamiaje del spike (ComboBox + botones) conservado temporalmente en la titlebar.
+Validado lo que importaba de la rebanada: el hueco del reparenting respeta el espacio de la sidebar y encaja en su área. El diseño se banca la estructura.
+
+Descubierto / aprendido:
+
+La identidad visual necesitaba contención, no menos densidad. El problema no nombrado era falta de estructura (elementos flotando) + falta de columna de identidad. Se resolvió con paneles contenidos + sidebar vertebral, estilo Linear.
+Restricción de diseño confirmada como load-bearing: el IDE reparentado pinta encima de su región, así que ningún elemento WPF (ticks, bordes, barras) puede ir sobre el hueco — solo alrededor. Condiciona todo el layout.
+El layout nuevo corrió el timing del encaje (el hueco ahora es celda de un Grid con sidebar, tarda un instante más en asentar su ancho). Eso reexpuso el render intermitente de Chromium — las salvaguardas de repintado no alcanzan en el nuevo contexto de timing.
+
+Bugs abiertos (para próximas sesiones):
+
+Detección de cierre externo (prioritario): si el usuario cierra VS Code con la X, OneBlack no se entera, cree que sigue adoptada, y puede duplicar ventanas al re-adoptar. Es un requisito ya documentado ("detectar si un IDE se cerró externamente"). Solución conocida: watcher periódico con IsWindow que limpie handles muertos. Próximo objetivo, acotado y limpio.
+Repintado intermitente de Chromium (pulido): negro aleatorio al adoptar en el layout nuevo. Es una carrera de timing conocida. Plan: engancharlo al SizeChanged (cuando el layout está asentado) en vez de a timers que adivinan. Atacar cuando el layout final esté estable.
+
+Pendiente visual: logo real (el "1" calado — hoy es un cuadrado simple), pestañas reales conectadas a adoptar/mostrar/devolver (próxima rebanada), cockpit (consola + proyectos).
