@@ -4,6 +4,8 @@
              xmlns:local="clr-namespace:OneBlack.Contenedor"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+        
+        <local:BoolAVisibilityConverter x:Key="BoolAVis"/>
 
         <!-- ===== Paleta Terminal Neón (traducida de los tokens :root del mockup) ===== -->
         <!-- Superficies -->
@@ -68,10 +70,52 @@
         </Style>
 
         <!-- Estilo de ítem de sidebar -->
-        <Style x:Key="SideItem" TargetType="Button" BasedOn="{StaticResource TabButton}">
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <!-- Ítem de sidebar: ícono + label. Se adapta a plegado/desplegado vía el
+     Tag del botón ("plegada"/"desplegada"), sin tocar nada desde code-behind. -->
+        <Style x:Key="SideItem" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Height" Value="34"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                        CornerRadius="7" Padding="7,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- Ícono (siempre visible) -->
+                                <TextBlock Grid.Column="0" Text="{TemplateBinding Tag}"
+                                   x:Name="ico"
+                                   Foreground="{StaticResource Dim}"
+                                   FontFamily="Consolas" FontSize="12"
+                                   Width="22" TextAlignment="Center"
+                                   VerticalAlignment="Center"/>
+                                <!-- Label (se oculta al plegar) -->
+                                <ContentPresenter Grid.Column="1" x:Name="lbl"
+                                          VerticalAlignment="Center" Margin="8,0,0,0"
+                                          TextElement.Foreground="{StaticResource Dim}"
+                                          Visibility="{Binding LabelsVisibles,
+                                                       RelativeSource={RelativeSource AncestorType=Window},
+                                                       Converter={StaticResource BoolAVis}}"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#111017"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
     </Application.Resources>

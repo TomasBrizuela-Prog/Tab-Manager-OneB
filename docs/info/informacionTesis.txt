@@ -62,4 +62,61 @@ Bugs abiertos (para próximas sesiones):
 Detección de cierre externo (prioritario): si el usuario cierra VS Code con la X, OneBlack no se entera, cree que sigue adoptada, y puede duplicar ventanas al re-adoptar. Es un requisito ya documentado ("detectar si un IDE se cerró externamente"). Solución conocida: watcher periódico con IsWindow que limpie handles muertos. Próximo objetivo, acotado y limpio.
 Repintado intermitente de Chromium (pulido): negro aleatorio al adoptar en el layout nuevo. Es una carrera de timing conocida. Plan: engancharlo al SizeChanged (cuando el layout está asentado) en vez de a timers que adivinan. Atacar cuando el layout final esté estable.
 
-Pendiente visual: logo real (el "1" calado — hoy es un cuadrado simple), pestañas reales conectadas a adoptar/mostrar/devolver (próxima rebanada), cockpit (consola + proyectos).
+Pendiente visual: logo real (el "1" calado — hoy es un cuadrado simple), pestañas reales conectadas a adoptar/mostrar/devolver (próxima rebanada), cockpit (consola + proyectos)
+
+
+25/08
+Bitácora — Sistema de pestañas, apertura de proyectos y refinamiento visual
+Resumen ejecutivo
+
+Sesiones dedicadas a convertir OneBlack de "adopta una ventana" a "gestor multi-ventana con pestañas". Se construyó el sistema de pestañas dinámicas, la apertura real de proyectos vía selector de carpeta, y se resolvieron varios bugs de foco, encaje y ciclo de vida que fueron apareciendo. En paralelo se consolidó la capa visual (chrome Terminal Neón) y se hizo la sidebar plegable. Al cierre, OneBlack ya permite abrir varios proyectos en pestañas, cambiar entre ellos, y las pestañas mueren con su ventana.
+
+Hecho y funcionando
+
+Foco de teclado — resuelto en capas.
+
+Al lanzar OneBlack la ventana él mismo, esta nace sin ser "activada" por el usuario, así que AttachThreadInput no alcanzaba. Se sumó SetForegroundWindow + SetFocus en MostrarSolo para entregar el foco a nivel SO.
+Tras notificación del IDE que roba el foco, se recupera solo mediante un timer que reafirma el foco periódicamente (con guarda this.IsActive para no robar foco a otras apps). Se extrajo ReaplicarFoco en el core: versión quirúrgica que reaplica SOLO foco, sin tocar show/hide/encaje/repintado (clave para poder dispararlo seguido sin romper el encaje).
+
+Clavado de ventana (posición) — resuelto pragmáticamente.
+
+La ventana adoptada se desencajaba (arrastrándola desde la topbar custom de Chromium, o por el borde) y se rompía al maximizar. La subclasificación (WM_WINDOWPOSCHANGING) sola no alcanzó porque Chromium mueve su ventana por vías internas no interceptables.
+Solución: timer corrector que reencaja en (0,0) cada 200ms vía ReajustarTamaño. Atrapa todas las vías porque corrige el hecho consumado. Decisión de ingeniería consciente: robustez reactiva sobre elegancia preventiva.
+
+Motor de lanzamiento (LanzadorDeProgramas).
+
+OneBlack lanza el programa con sus flags (--disable-gpu) apuntando a una carpeta, hace polling hasta que aparece la ventana, y la adopta. Más rápido y limpio que adoptar lo abierto por el usuario.
+CatalogoDeProgramas extendido con ArgumentosBase y UsaCarpeta.
+
+Sistema de pestañas (Opción A — idiomática WPF).
+
+PestañaVentana (modelo con INotifyPropertyChanged), ObservableCollection<PestañaVentana> bindeada a un ItemsControl. Una pestaña por ventana adoptada.
+Cambio de pestaña vía MostrarSolo de la elegida. Pestaña Cockpit fija + pestañas de IDE dinámicas + botón "+".
+Detección de cierre externo: un chequeo periódico (LimpiarPestañasMuertas + VentanaSigueViva en el core) elimina la pestaña cuando su ventana muere por la X/Alt+F4/crash. Resuelve el pendiente que arrastrábamos: la pestaña ahora muere con su contenido.
+
+Apertura real de proyectos.
+
+El "+"/flujo de apertura abre un selector de carpeta nativo (OpenFolderDialog) y lanza VS Code ahí. Se extrajo LanzarYAgregarPestaña como flujo central reutilizable.
+Guarda anti-duplicado: cada pestaña recuerda su carpeta; si intentás abrir una ya abierta, activa la existente en vez de relanzar. Resolvió el bug del lanzamiento colgado que cruzaba nombres de pestañas.
+
+Chrome visual Terminal Neón consolidado.
+
+Layout final: titlebar (pestañas + "+"), sidebar de identidad (logo, navegación de espacios, hub), statusbar fina, hueco enmarcado. Andamiaje del spike (ComboBox/Refrescar/Adoptar/Devolver) removido.
+Tokens de color traducidos a recursos WPF en App.xaml.
+
+Sidebar plegable — hecha profesionalmente.
+
+Riel de 56px con íconos al plegar, 212px con texto al desplegar. Al plegar/desplegar, la ventana adoptada se reajusta para llenar el nuevo espacio (plegado "de verdad", no cosmético).
+Implementado con Style/ControlTemplate + binding (converter BoolAVisibilityConverter, INotifyPropertyChanged en la Window) en vez de recorrer el árbol visual. Se introdujo infraestructura reusable (converter, notificación) que sirve para el resto de la UI con datos.
+Descubierto / aprendido
+El foco tiene más capas de las que sabíamos: acople de input (AttachThreadInput) ≠ entrega de foco (SetForegroundWindow+SetFocus). Una ventana lanzada por OneBlack necesita ambas.
+Reafirmar el foco muy seguido pelea con los clicks del usuario: el timer a 200ms hacía que los clicks en pestañas "no respondieran". Se separó reencaje (200ms) de refoco (~1s). Balance fino: muy seguido estorba, muy espaciado tarda en recuperar teclado.
+Chromium mueve su ventana por vías internas no interceptables desde la top-level. Confirmó (otra vez) que la ventana adoptada es un cascarón y la acción real pasa en ventanas internas de Chromium.
+VS Code reusa ventana para una carpeta ya abierta → el lanzador quedaba colgado esperando una ventana nueva que no llegaba, y capturaba la siguiente ventana con la etiqueta vieja. Se resolvió con la guarda anti-duplicado.
+Bugs/pendientes abiertos
+Botón de desplegar solapado en el riel plegado (visual menor, anotado).
+Botones de sidebar deshabilitados cuando no aplican: el trigger visual ya está en el estilo (IsEnabled=False → opacity 0.35); falta conectar la lógica cuando se implemente la navegación.
+Página "nueva pestaña" (próximo objetivo grande): que el "+" abra una página base de OneBlack estilo "nueva pestaña de navegador" — apps disponibles para adoptar, selector de carpeta, y a futuro proyectos recientes. Implica arquitectura de área central que alterne entre ventanas adoptadas y páginas propias de OneBlack (ocultando el hueco cuando se muestra una página WPF, por la restricción de que el IDE pinta encima). Desbloquea también el Cockpit.
+Persistencia de proyectos (recientes + fijados): archivo JSON local en %LocalAppData%\OneBlack\, sin cuenta ni login (app local single-user, ya decidido). Mismo mecanismo que PersistenciaEstado ya usa.
+Lanzamientos simultáneos rápidos podrían cruzarse (caso borde); el fix robusto sería identificar la ventana por PID del proceso lanzado, no por "cualquier ventana nueva". No prioritario.
+Arrastrados de antes: detección de cierre externo (RESUELTO esta sesión vía pestañas), adaptar IntelliJ/WebStorm, decisión de firma/distribución (ADR abierto).

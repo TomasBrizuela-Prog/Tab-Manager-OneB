@@ -160,6 +160,12 @@ namespace OneBlack.Core
         /// Útil para que la UI no las pierda al refrescar la lista de candidatas.
         /// </summary>
         public IEnumerable<IntPtr> HwndsAdoptados() => adoptadas.Keys.ToList();
+        /// <summary>
+        /// ¿La ventana con este HWND sigue existiendo? Lo usa la UI para detectar que
+        /// una ventana adoptada se cerró por fuera (la X del IDE, Alt+F4, crash) y así
+        /// eliminar su pestaña. Devuelve false si el handle ya murió.
+        /// </summary>
+        public bool VentanaSigueViva(IntPtr hwnd) => IsWindow(hwnd);
 
         /// <summary>
         /// Reaplica SOLO el foco de teclado a una ventana ya adoptada y visible, sin tocar

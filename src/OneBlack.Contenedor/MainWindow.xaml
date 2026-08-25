@@ -29,14 +29,15 @@
                     <!-- acción provisoria + controles -->
                 </Grid.ColumnDefinitions>
 
-                <!-- Pestañas (hoy solo Cockpit; las de IDE serán dinámicas en la Capa 2) -->
+                <!-- Pestañas: Cockpit fija + pestañas de IDE dinámicas -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
 
-                    <!-- Pestaña Cockpit (activa) -->
+                    <!-- Pestaña Cockpit (fija, siempre presente) -->
                     <Button Style="{StaticResource TabButton}"
                             Background="{StaticResource TabBg}"
                             BorderBrush="{StaticResource TabEdge}"
-                            Foreground="{StaticResource Fg}">
+                            Foreground="{StaticResource Fg}"
+                            Click="navCockpit_Click">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
                                      VerticalAlignment="Center" Margin="0,0,9,0"/>
@@ -44,7 +45,32 @@
                         </StackPanel>
                     </Button>
 
-                    <!-- Botón "+" para agregar/adoptar ventana (Capa 2: abrirá el selector) -->
+                    <!-- Pestañas dinámicas: una por ventana adoptada -->
+                    <ItemsControl x:Name="barraPestañas">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <!-- Cada pestaña: botón con dot + título. Se resalta si EstaActiva. -->
+                                <Button Style="{StaticResource TabButton}" Click="Pestaña_Click">
+                                    <Button.Resources>
+                                        <!-- Resalta la pestaña activa (fondo + borde), como Cockpit. -->
+                                        <Style TargetType="Button" BasedOn="{StaticResource TabButton}"/>
+                                    </Button.Resources>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
+                                                 VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                        <TextBlock Text="{Binding Titulo}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Botón "+" para agregar/adoptar ventana -->
                     <Button x:Name="botonAgregar" Style="{StaticResource TabButton}"
                             Content="+" FontSize="16" Padding="10,0"
                             Foreground="{StaticResource Dim}"
@@ -75,54 +101,55 @@
             <!-- SIDEBAR de identidad -->
             <Border Grid.Column="0" Background="{StaticResource Chrome}"
                     BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
-                <DockPanel Margin="10,16,10,12">
+                <DockPanel Margin="8,16,8,12">
 
-                    <!-- Cabecera: logo + wordmark + toggle plegar -->
-                    <Grid DockPanel.Dock="Top" Margin="6,0,6,18">
+                    <!-- Cabecera: logo + wordmark + toggle -->
+                    <Grid DockPanel.Dock="Top" Margin="4,0,4,18">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <Border Width="20" Height="20" CornerRadius="5"
-                                    Background="{StaticResource Accent}" Margin="0,0,10,0"/>
-                            <TextBlock Text="OneBlack" Foreground="{StaticResource Fg}"
+                            <Border Width="24" Height="24" CornerRadius="5"
+                                    Background="{StaticResource Accent}"/>
+                            <TextBlock x:Name="txtWordmark" Text="OneBlack"
+                                       Foreground="{StaticResource Fg}"
                                        FontSize="13" FontFamily="Consolas"
-                                       VerticalAlignment="Center"/>
+                                       VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
-                        <!-- Toggle para plegar la sidebar (Capa 2: plegado real a riel) -->
                         <Button x:Name="botonPlegar" Content="«"
                                 HorizontalAlignment="Right" VerticalAlignment="Center"
                                 Style="{StaticResource TabButton}"
-                                Foreground="{StaticResource Dim}" Padding="6,0"
-                                Click="botonPlegar_Click"
-                                ToolTip="Plegar panel (próximamente)"/>
+                                Background="{StaticResource Panel}"
+                                Foreground="{StaticResource Fg2}" Padding="8,2"
+                                Click="botonPlegar_Click"/>
                     </Grid>
 
-                    <!-- Pie: estado del hub (queda abajo) -->
+                    <!-- Pie: estado del hub -->
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                                 Margin="6,0" VerticalAlignment="Bottom">
                         <Ellipse Width="5" Height="5" Fill="{StaticResource Data}"
-                                 VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="one-hub" Foreground="{StaticResource Faint}"
+                                 VerticalAlignment="Center"/>
+                        <TextBlock x:Name="txtHub" Text="one-hub"
+                                   Foreground="{StaticResource Faint}"
                                    FontFamily="Consolas" FontSize="11"
-                                   VerticalAlignment="Center"/>
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
 
                     <!-- Navegación de espacios -->
-                    <StackPanel>
-                        <TextBlock Text="ESPACIO" Foreground="{StaticResource Ghost}"
+                    <StackPanel x:Name="navEspacio">
+                        <TextBlock x:Name="txtGrupoEspacio" Text="ESPACIO"
+                                   Foreground="{StaticResource Ghost}"
                                    FontFamily="Consolas" FontSize="10" Margin="9,0,0,8"/>
-                        <Button Style="{StaticResource SideItem}" Content="Cockpit"
-                                Foreground="{StaticResource Fg}" Background="{StaticResource AccentBg}"
+
+                        <Button Style="{StaticResource SideItem}" Tag="C" Content="Cockpit"
                                 Click="navCockpit_Click"/>
-                        <Button Style="{StaticResource SideItem}" Content="Proyectos"
+                        <Button Style="{StaticResource SideItem}" Tag="P" Content="Proyectos"
                                 Click="navProyectos_Click"/>
-                        <Button Style="{StaticResource SideItem}" Content="Git"
+                        <Button Style="{StaticResource SideItem}" Tag="G" Content="Git"
                                 Click="navGit_Click"/>
-                        <Button Style="{StaticResource SideItem}" Content="Ajustes"
+                        <Button Style="{StaticResource SideItem}" Tag="A" Content="Ajustes"
                                 Click="navAjustes_Click"/>
                     </StackPanel>
 
                 </DockPanel>
             </Border>
-
             <!-- ÁREA CENTRAL: el hueco del reparenting.
                  IMPORTANTE: el IDE reparentado pinta encima de esta región,
                  así que NO ponemos nada de WPF sobre el hueco, solo el borde

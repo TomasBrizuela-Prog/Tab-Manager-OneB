@@ -1,14 +1,28 @@
-﻿using OneBlack.Core;
+﻿using Microsoft.Win32;
+using OneBlack.Core;
 using System;
 using System.Diagnostics;
-using System.Windows;
 using System.Diagnostics;
 using System.IO;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace OneBlack.Contenedor
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : Window, System.ComponentModel.INotifyPropertyChanged
     {
+        // ... tu código existente ...
+
+        private bool labelsVisibles = true;
+        public bool LabelsVisibles
+        {
+            get => labelsVisibles;
+            set { labelsVisibles = value; OnPropertyChanged(nameof(LabelsVisibles)); }
+        }
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged(string n) =>
+        PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(n));
         private readonly AdoptadorDeVentanas adoptador = new AdoptadorDeVentanas();
 
         // Recordamos las candidatas que adoptamos, porque tras adoptarlas ya no
@@ -41,10 +55,18 @@ namespace OneBlack.Contenedor
         // red de seguridad definitiva: no importa CÓMO se movió, si no está encajado, lo
         // reencaja. Reusa ReajustarTamaño, que ya sabe clavarlo en (0,0).
         private System.Windows.Threading.DispatcherTimer? clavadoTimer;
+
+        // La colección de pestañas abiertas. ObservableCollection avisa sola a la UI
+        // cuando agregás/quitás elementos — como un array reactivo de Angular. El
+        // ItemsControl del XAML la dibuja y se actualiza solo.
+        private readonly System.Collections.ObjectModel.ObservableCollection<PestañaVentana> pestañas = new();
         public MainWindow()
         {
             InitializeComponent();
-           
+            // Conectar la colección de pestañas a la barra de pestañas del XAML.
+            barraPestañas.ItemsSource = pestañas;
+            DataContext = this;   // para que los bindings de la Window funcionen
+
             // Re-aplicar el foco de teclado a la ventana adoptada cuando:
             //  (a) OneBlack se activa (Activated), o
             //  (b) el usuario hace click en cualquier parte de OneBlack (PreviewMouseDown).
@@ -143,7 +165,9 @@ namespace OneBlack.Contenedor
         /// </summary>
         private void ArrancarClavado()
         {
-            if (clavadoTimer != null) return;   // ya está corriendo
+            if (clavadoTimer != null) return;
+
+            int ticks = 0;   // contador para espaciar el refoco
 
             clavadoTimer = new System.Windows.Threading.DispatcherTimer
             {
@@ -151,15 +175,26 @@ namespace OneBlack.Contenedor
             };
             clavadoTimer.Tick += (s, e) =>
             {
+                // Eliminar pestañas de ventanas muertas (esto puede correr seguido, es barato).
+                LimpiarPestañasMuertas();
+
                 if (hwndVisibleActual != IntPtr.Zero && adoptador.YaEstaAdoptada(hwndVisibleActual))
                 {
+                    // El reencaje corre en cada tick (mantener la ventana clavada no molesta).
                     var (a, al) = DimensionesFisicas();
-                    adoptador.ReajustarTamaño(a, al);       // el reencaje sí corre siempre
+                    adoptador.ReajustarTamaño(a, al);
 
-                    // El foco SOLO se reafirma si OneBlack está en primer plano. Si el usuario
-                    // se fue a otra app, no le robamos el foco de vuelta cada 200ms.
-                    if (this.IsActive)
-                        adoptador.ReaplicarFoco(hwndVisibleActual);
+                    // El REFOCO corre solo 1 de cada 5 ticks (~cada 1s) y solo si OneBlack
+                    // está activa. Reafirmarlo tan seguido como el reencaje peleaba con los
+                    // clicks del usuario en las pestañas (por eso "no respondía"). Cada segundo
+                    // alcanza para recuperar el teclado tras una notificación, sin estorbar.
+                    ticks++;
+                    if (ticks >= 5)
+                    {
+                        ticks = 0;
+                        if (this.IsActive)
+                            adoptador.ReaplicarFoco(hwndVisibleActual);
+                    }
                 }
             };
             clavadoTimer.Start();
@@ -171,7 +206,53 @@ namespace OneBlack.Contenedor
             clavadoTimer?.Stop();
             clavadoTimer = null;
         }
-     
+
+        /// <summary>
+        /// Agrega una pestaña para una ventana recién adoptada y la activa.
+        /// </summary>
+        private void AgregarPestaña(IntPtr hwnd, ProgramaSoportado programa, string titulo, string carpeta)
+        {
+            var pestaña = new PestañaVentana(hwnd, programa, titulo, carpeta);
+            pestañas.Add(pestaña);
+            ActivarPestaña(pestaña);
+        }
+
+        /// <summary>
+        /// Activa una pestaña: muestra su ventana (ocultando el resto), marca cuál está
+        /// activa para que la UI la resalte, y arranca las salvaguardas (foco, repintado,
+        /// clavado) sobre ella. Es el "cambio de pestaña".
+        /// </summary>
+        private void ActivarPestaña(PestañaVentana pestaña)
+        {
+            if (pestaña == null || !adoptador.YaEstaAdoptada(pestaña.Hwnd))
+                return;
+
+            // Marcar el estado activo (la UI resalta la activa y apaga las demás).
+            foreach (var p in pestañas)
+                p.EstaActiva = (p == pestaña);
+
+            // Mostrar su ventana y ocultar las otras adoptadas.
+            hwndVisibleActual = pestaña.Hwnd;
+            adoptador.MostrarSolo(pestaña.Hwnd);
+
+            // Salvaguardas sobre la ventana que ahora se muestra.
+            ProgramarRepintados(pestaña.Hwnd);
+            ReaplicarFocoDiferido(pestaña.Hwnd);
+            ArrancarClavado();   // idempotente: si ya corría, no hace nada
+
+            textoEstado.Text = $"{pestaña.Titulo} · {pestaña.Programa.NombreMostrado}";
+        }
+
+        /// <summary>
+        /// Handler del click en una pestaña. El botón de la pestaña lleva la PestañaVentana
+        /// en su DataContext (viene del binding), así la recuperamos y la activamos.
+        /// </summary>
+        private void Pestaña_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is FrameworkElement fe && fe.DataContext is PestañaVentana pestaña)
+                ActivarPestaña(pestaña);
+        }
+
         /// <summary>
         /// Re-aplica el foco de teclado un instante después de adoptar una ventana
         /// recién lanzada. Necesario porque al lanzar+adoptar en <1s, el thread de
@@ -202,33 +283,7 @@ namespace OneBlack.Contenedor
             var vscode = CatalogoDeProgramas.Buscar("Code");
             if (vscode == null) { textoEstado.Text = "VS Code no está en el catálogo."; return; }
 
-            textoEstado.Text = "Lanzando VS Code…";
-
-            //
-            string carpeta = @"C:\Dev\Tesis\ProyectosPrueba\RECUPERATORIO";
-
-            IntPtr hwnd = await lanzador.LanzarYEsperar(vscode, carpeta);
-            if (hwnd == IntPtr.Zero)
-            {
-                textoEstado.Text = "La ventana no apareció (timeout).";
-                return;
-            }
-
-            // Apareció: adoptarla, igual que el flujo manual.
-            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            anfitriona.UpdateLayout();
-            var (ancho, alto) = DimensionesFisicas();
-
-            if (adoptador.Adoptar(hwnd, hwndContenedor, ancho, alto))
-            {
-                hwndVisibleActual = hwnd;
-                adoptador.MostrarSolo(hwnd);
-                ProgramarRepintados(hwnd);
-                ReaplicarFocoDiferido(hwnd);
-                ArrancarClavado();                 // ← red de seguridad de posición
-                textoEstado.Text = "Proyecto lanzado y adoptado.";
-            }
-            else textoEstado.Text = "Apareció la ventana pero falló la adopción.";
+            await LanzarYAgregarPestaña(vscode, @"C:\Dev\Tesis\ProyectosPrueba\RECUPERATORIO");
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -248,6 +303,44 @@ namespace OneBlack.Contenedor
         {
             IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
             adoptador.DevolverTodas(hwndContenedor);
+        }
+
+        /// <summary>
+        /// Revisa si alguna pestaña apunta a una ventana que ya murió (el usuario cerró
+        /// el IDE por la X, Alt+F4, crash, etc.) y la elimina. Sin esto, quedaría una
+        /// pestaña huérfana apuntando a una ventana inexistente, y relanzar duplicaría.
+        /// Barato: recorre la lista de pestañas y chequea IsWindow vía el adoptador.
+        /// </summary>
+        private void LimpiarPestañasMuertas()
+        {
+            // Buscamos pestañas cuya ventana ya no exista.
+            // (YaEstaAdoptada devuelve false si el core ya la limpió, pero la ventana
+            //  puede haber muerto sin que el core se enterara — por eso chequeamos el HWND.)
+            var muertas = pestañas
+                .Where(p => !adoptador.VentanaSigueViva(p.Hwnd))
+                .ToList();
+
+            if (muertas.Count == 0)
+                return;
+
+            foreach (var muerta in muertas)
+            {
+                // Que el core suelte su estado interno de esa ventana (sin operar sobre
+                // el handle muerto — Devolver ya maneja ese caso con IsWindow).
+                adoptador.Devolver(muerta.Hwnd, anfitriona.ObtenerHwndContenedor());
+                pestañas.Remove(muerta);
+
+                // Si la que murió era la visible, limpiamos la referencia.
+                if (hwndVisibleActual == muerta.Hwnd)
+                    hwndVisibleActual = IntPtr.Zero;
+            }
+
+            // Si quedó alguna pestaña, activamos la primera para no dejar el hueco vacío
+            // con pestañas disponibles.
+            if (hwndVisibleActual == IntPtr.Zero && pestañas.Count > 0)
+                ActivarPestaña(pestañas[0]);
+
+            textoEstado.Text = "Se cerró una ventana; pestaña eliminada.";
         }
 
         /// <summary>
@@ -278,18 +371,97 @@ namespace OneBlack.Contenedor
 
         // ===== Handlers del chrome, cableados en seco (se conectan en su módulo) =====
 
-        // "+" — Capa 2: abrirá el selector de programas para adoptar/lanzar.
-        private void botonAgregar_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// "+": abre un selector de carpeta y lanza VS Code apuntando a ella, como una
+        /// pestaña nueva. Reemplaza el botón de prueba con carpeta hardcodeada: ahora el
+        /// usuario elige qué proyecto abrir.
+        /// </summary>
+        private async void botonAgregar_Click(object sender, RoutedEventArgs e)
         {
-            textoEstado.Text = "Agregar ventana: próximamente.";
-        }
+            var vscode = CatalogoDeProgramas.Buscar("Code");
+            if (vscode == null) { textoEstado.Text = "VS Code no está en el catálogo."; return; }
 
-        // Plegar sidebar — Capa 2: plegado real a riel de 56px.
+            // Diálogo nativo de Windows para elegir carpeta.
+            var dialogo = new OpenFolderDialog
+            {
+                Title = "Elegí la carpeta del proyecto a abrir"
+            };
+
+            // Si el usuario cancela, no hacemos nada.
+            if (dialogo.ShowDialog() != true)
+                return;
+
+            string carpeta = dialogo.FolderName;
+            await LanzarYAgregarPestaña(vscode, carpeta);
+        }
+        /// <summary>
+        /// Lanza un programa apuntando a una carpeta, espera su ventana, la adopta y le
+        /// crea una pestaña. Es el flujo central de "abrir algo": lo usan el "+" y
+        /// (por ahora) el botón de prueba.
+        /// </summary>
+        private async Task LanzarYAgregarPestaña(ProgramaSoportado programa, string carpeta)
+        {
+            // ¿Ya hay una pestaña para esta carpeta? Si sí, la activamos en vez de
+            // relanzar. Evita duplicar y evita el bug de VS Code reusando ventana
+            // (que dejaba el lanzamiento colgado esperando una ventana que no llega).
+            if (!string.IsNullOrWhiteSpace(carpeta))
+            {
+                var existente = pestañas.FirstOrDefault(p =>
+                    string.Equals(p.Carpeta, carpeta, StringComparison.OrdinalIgnoreCase));
+                if (existente != null)
+                {
+                    ActivarPestaña(existente);
+                    textoEstado.Text = $"{existente.Titulo} ya está abierto.";
+                    return;
+                }
+            }
+
+            textoEstado.Text = $"Lanzando {programa.NombreMostrado}…";
+
+            IntPtr hwnd = await lanzador.LanzarYEsperar(programa, carpeta);
+            if (hwnd == IntPtr.Zero)
+            {
+                textoEstado.Text = "La ventana no apareció (timeout).";
+                return;
+            }
+
+            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
+            anfitriona.UpdateLayout();
+            var (ancho, alto) = DimensionesFisicas();
+
+            if (adoptador.Adoptar(hwnd, hwndContenedor, ancho, alto))
+            {
+                string titulo = string.IsNullOrWhiteSpace(carpeta)
+                    ? programa.NombreMostrado
+                    : System.IO.Path.GetFileName(carpeta.TrimEnd('\\'));
+
+                AgregarPestaña(hwnd, programa, titulo, carpeta);   // ← ahora pasa la carpeta
+                textoEstado.Text = $"{titulo} abierto.";
+            }
+            else textoEstado.Text = "Apareció la ventana pero falló la adopción.";
+        }
+        // Estado del plegado de la sidebar.
+
+        private bool sidebarPlegada = false;
+
+
+
         private void botonPlegar_Click(object sender, RoutedEventArgs e)
         {
-            textoEstado.Text = "Plegar panel: próximamente.";
-        }
+            sidebarPlegada = !sidebarPlegada;
+            colSidebar.Width = new GridLength(sidebarPlegada ? 56 : 212);
+            LabelsVisibles = !sidebarPlegada;   // los labels reaccionan solos vía binding
+            txtWordmark.Visibility = txtHub.Visibility = txtGrupoEspacio.Visibility =
+                sidebarPlegada ? Visibility.Collapsed : Visibility.Visible;
+            botonPlegar.Content = sidebarPlegada ? "»" : "«";
 
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var (ancho, alto) = DimensionesFisicas();
+                adoptador.ReajustarTamaño(ancho, alto);
+            }), System.Windows.Threading.DispatcherPriority.Render);
+        }
+   
         // Navegación de espacios — Capa 2: cambiar la vista central.
         private void navCockpit_Click(object sender, RoutedEventArgs e) { }
         private void navProyectos_Click(object sender, RoutedEventArgs e)
