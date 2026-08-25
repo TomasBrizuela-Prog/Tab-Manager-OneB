@@ -60,13 +60,17 @@ namespace OneBlack.Contenedor
         // cuando agregás/quitás elementos — como un array reactivo de Angular. El
         // ItemsControl del XAML la dibuja y se actualiza solo.
         private readonly System.Collections.ObjectModel.ObservableCollection<PestañaVentana> pestañas = new();
+
+        // La pestaña actualmente activa (puede estar vacía u ocupada). null = ninguna
+        // (estás en el Cockpit).
+        private PestañaVentana? pestañaActiva;
         public MainWindow()
         {
             InitializeComponent();
             // Conectar la colección de pestañas a la barra de pestañas del XAML.
             barraPestañas.ItemsSource = pestañas;
             DataContext = this;   // para que los bindings de la Window funcionen
-
+            MostrarPaginaPropia(paginaCockpit);
             // Re-aplicar el foco de teclado a la ventana adoptada cuando:
             //  (a) OneBlack se activa (Activated), o
             //  (b) el usuario hace click en cualquier parte de OneBlack (PreviewMouseDown).
@@ -76,7 +80,10 @@ namespace OneBlack.Contenedor
             PreviewMouseDown += (s, e) => ReenfocarVisible();
             //LanzarJanitor();
             //RefrescarCandidatas();
-
+            // Cuando el usuario elige qué abrir en la página nueva pestaña,
+            // lo adoptamos en la pestaña activa.
+            paginaNuevaPestaña.SeEligioAbrir += async (programa, carpeta) =>
+                await AbrirEnPestañaActiva(programa, carpeta);
             // Cuando el hueco cambia de tamaño, reajustar las ventanas adoptadas.
             anfitriona.SizeChanged += (s, e) =>
             {
@@ -207,42 +214,112 @@ namespace OneBlack.Contenedor
             clavadoTimer = null;
         }
 
-        /// <summary>
-        /// Agrega una pestaña para una ventana recién adoptada y la activa.
-        /// </summary>
-        private void AgregarPestaña(IntPtr hwnd, ProgramaSoportado programa, string titulo, string carpeta)
-        {
-            var pestaña = new PestañaVentana(hwnd, programa, titulo, carpeta);
-            pestañas.Add(pestaña);
-            ActivarPestaña(pestaña);
-        }
+
 
         /// <summary>
         /// Activa una pestaña: muestra su ventana (ocultando el resto), marca cuál está
         /// activa para que la UI la resalte, y arranca las salvaguardas (foco, repintado,
         /// clavado) sobre ella. Es el "cambio de pestaña".
         /// </summary>
+        /// <summary>
+        /// Activa una pestaña. Si está OCUPADA, muestra su IDE (hueco). Si está VACÍA,
+        /// muestra la página de nueva pestaña. Marca cuál está activa para la UI.
+        /// </summary>
         private void ActivarPestaña(PestañaVentana pestaña)
         {
-            if (pestaña == null || !adoptador.YaEstaAdoptada(pestaña.Hwnd))
-                return;
+            if (pestaña == null) return;
 
-            // Marcar el estado activo (la UI resalta la activa y apaga las demás).
+            pestañaActiva = pestaña;
+
+            // Marcar estado activo (la UI resalta la activa).
             foreach (var p in pestañas)
                 p.EstaActiva = (p == pestaña);
 
-            // Mostrar su ventana y ocultar las otras adoptadas.
-            hwndVisibleActual = pestaña.Hwnd;
-            adoptador.MostrarSolo(pestaña.Hwnd);
+            if (pestaña.EstaVacia)
+            {
+                // Pestaña vacía → mostrar la página de nueva pestaña.
+                // Ocultar cualquier IDE que estuviera visible.
+                if (hwndVisibleActual != IntPtr.Zero)
+                {
+                    adoptador.OcultarVentana(hwndVisibleActual);
+                    hwndVisibleActual = IntPtr.Zero;
+                }
+                MostrarPaginaPropia(paginaNuevaPestaña);
+            }
+            else
+            {
+                // Pestaña ocupada → mostrar su IDE.
+                MostrarHueco();
+                hwndVisibleActual = pestaña.Hwnd;
+                adoptador.MostrarSolo(pestaña.Hwnd);
+                ProgramarRepintados(pestaña.Hwnd);
+                ReaplicarFocoDiferido(pestaña.Hwnd);
+                ArrancarClavado();
+            }
 
-            // Salvaguardas sobre la ventana que ahora se muestra.
-            ProgramarRepintados(pestaña.Hwnd);
-            ReaplicarFocoDiferido(pestaña.Hwnd);
-            ArrancarClavado();   // idempotente: si ya corría, no hace nada
-
-            textoEstado.Text = $"{pestaña.Titulo} · {pestaña.Programa.NombreMostrado}";
+            textoEstado.Text = pestaña.EstaVacia
+                ? "Nueva pestaña."
+                : $"{pestaña.Titulo} · {pestaña.Programa?.NombreMostrado}";
         }
 
+        /// <summary>
+        /// Lanza un programa y, cuando aparece su ventana, la adopta EN LA PESTAÑA ACTIVA
+        /// (la transforma de vacía a ocupada). Es el flujo "elegí algo en la nueva pestaña".
+        /// </summary>
+        private async Task AbrirEnPestañaActiva(ProgramaSoportado programa, string? carpeta)
+        {
+            // Guarda anti-duplicado: si ya hay una pestaña OCUPADA con esta carpeta, activá esa.
+            if (!string.IsNullOrWhiteSpace(carpeta))
+            {
+                var existente = pestañas.FirstOrDefault(p =>
+                    !p.EstaVacia &&
+                    string.Equals(p.Carpeta, carpeta, StringComparison.OrdinalIgnoreCase));
+                if (existente != null)
+                {
+                    ActivarPestaña(existente);
+                    textoEstado.Text = $"{existente.Titulo} ya está abierto.";
+                    return;
+                }
+            }
+
+            // La pestaña donde vamos a adoptar: la activa (que debería estar vacía).
+            var destino = pestañaActiva;
+            if (destino == null || !destino.EstaVacia)
+            {
+                // Si por algún motivo no hay una pestaña vacía activa, creamos una.
+                destino = new PestañaVentana();
+                pestañas.Add(destino);
+                ActivarPestaña(destino);
+            }
+
+            textoEstado.Text = $"Lanzando {programa.NombreMostrado}…";
+
+            IntPtr hwnd = await lanzador.LanzarYEsperar(programa, carpeta);
+            if (hwnd == IntPtr.Zero)
+            {
+                textoEstado.Text = "La ventana no apareció (timeout).";
+                return;
+            }
+
+            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
+            anfitriona.UpdateLayout();
+            var (ancho, alto) = DimensionesFisicas();
+
+            if (adoptador.Adoptar(hwnd, hwndContenedor, ancho, alto))
+            {
+                string titulo = string.IsNullOrWhiteSpace(carpeta)
+                    ? programa.NombreMostrado
+                    : System.IO.Path.GetFileName(carpeta.TrimEnd('\\'));
+
+                // TRANSFORMAR la pestaña vacía en ocupada.
+                destino.Ocupar(hwnd, programa, carpeta, titulo);
+
+                // Mostrarla ya como IDE.
+                ActivarPestaña(destino);
+                textoEstado.Text = $"{titulo} abierto.";
+            }
+            else textoEstado.Text = "Apareció la ventana pero falló la adopción.";
+        }
         /// <summary>
         /// Handler del click en una pestaña. El botón de la pestaña lleva la PestañaVentana
         /// en su DataContext (viene del binding), así la recuperamos y la activamos.
@@ -283,7 +360,12 @@ namespace OneBlack.Contenedor
             var vscode = CatalogoDeProgramas.Buscar("Code");
             if (vscode == null) { textoEstado.Text = "VS Code no está en el catálogo."; return; }
 
-            await LanzarYAgregarPestaña(vscode, @"C:\Dev\Tesis\ProyectosPrueba\RECUPERATORIO");
+            // Crear una pestaña vacía, activarla, y adoptar en ella (simula el flujo real).
+            var nueva = new PestañaVentana();
+            pestañas.Add(nueva);
+            ActivarPestaña(nueva);
+
+            await AbrirEnPestañaActiva(vscode, @"C:\Dev\Tesis\ProyectosPrueba\RECUPERATORIO");
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
@@ -313,11 +395,9 @@ namespace OneBlack.Contenedor
         /// </summary>
         private void LimpiarPestañasMuertas()
         {
-            // Buscamos pestañas cuya ventana ya no exista.
-            // (YaEstaAdoptada devuelve false si el core ya la limpió, pero la ventana
-            //  puede haber muerto sin que el core se enterara — por eso chequeamos el HWND.)
+            // Solo las OCUPADAS pueden tener ventana muerta; las vacías no tienen Hwnd.
             var muertas = pestañas
-                .Where(p => !adoptador.VentanaSigueViva(p.Hwnd))
+                .Where(p => !p.EstaVacia && !adoptador.VentanaSigueViva(p.Hwnd))
                 .ToList();
 
             if (muertas.Count == 0)
@@ -325,20 +405,22 @@ namespace OneBlack.Contenedor
 
             foreach (var muerta in muertas)
             {
-                // Que el core suelte su estado interno de esa ventana (sin operar sobre
-                // el handle muerto — Devolver ya maneja ese caso con IsWindow).
                 adoptador.Devolver(muerta.Hwnd, anfitriona.ObtenerHwndContenedor());
                 pestañas.Remove(muerta);
-
-                // Si la que murió era la visible, limpiamos la referencia.
                 if (hwndVisibleActual == muerta.Hwnd)
                     hwndVisibleActual = IntPtr.Zero;
+                if (pestañaActiva == muerta)
+                    pestañaActiva = null;
             }
 
-            // Si quedó alguna pestaña, activamos la primera para no dejar el hueco vacío
-            // con pestañas disponibles.
-            if (hwndVisibleActual == IntPtr.Zero && pestañas.Count > 0)
-                ActivarPestaña(pestañas[0]);
+            // Si quedó alguna pestaña, activamos la primera; si no, volvemos al Cockpit.
+            if (pestañaActiva == null)
+            {
+                if (pestañas.Count > 0)
+                    ActivarPestaña(pestañas[0]);
+                else
+                    navCockpit_Click(this, new RoutedEventArgs());   // volver al home
+            }
 
             textoEstado.Text = "Se cerró una ventana; pestaña eliminada.";
         }
@@ -376,69 +458,51 @@ namespace OneBlack.Contenedor
         /// pestaña nueva. Reemplaza el botón de prueba con carpeta hardcodeada: ahora el
         /// usuario elige qué proyecto abrir.
         /// </summary>
-        private async void botonAgregar_Click(object sender, RoutedEventArgs e)
+        private void botonAgregar_Click(object sender, RoutedEventArgs e)
         {
-            var vscode = CatalogoDeProgramas.Buscar("Code");
-            if (vscode == null) { textoEstado.Text = "VS Code no está en el catálogo."; return; }
-
-            // Diálogo nativo de Windows para elegir carpeta.
-            var dialogo = new OpenFolderDialog
-            {
-                Title = "Elegí la carpeta del proyecto a abrir"
-            };
-
-            // Si el usuario cancela, no hacemos nada.
-            if (dialogo.ShowDialog() != true)
-                return;
-
-            string carpeta = dialogo.FolderName;
-            await LanzarYAgregarPestaña(vscode, carpeta);
+            // Crear una pestaña VACÍA y activarla (muestra la página nueva pestaña).
+            var nueva = new PestañaVentana();
+            pestañas.Add(nueva);
+            ActivarPestaña(nueva);
         }
+      
+        // Instancias únicas de las páginas propias (se crean una vez y se reusan).
+        private readonly PaginaCockpit paginaCockpit = new();
+        private readonly PaginaNuevaPestaña paginaNuevaPestaña = new();
+
         /// <summary>
-        /// Lanza un programa apuntando a una carpeta, espera su ventana, la adopta y le
-        /// crea una pestaña. Es el flujo central de "abrir algo": lo usan el "+" y
-        /// (por ahora) el botón de prueba.
+        /// Muestra una página propia de OneBlack (Cockpit, nueva pestaña) en el área
+        /// central. OCULTA el hueco y cualquier ventana adoptada visible, porque el IDE
+        /// pinta encima de su región y taparía la página. Desmarca la pestaña de IDE activa.
         /// </summary>
-        private async Task LanzarYAgregarPestaña(ProgramaSoportado programa, string carpeta)
+        private void MostrarPaginaPropia(System.Windows.Controls.UserControl pagina)
         {
-            // ¿Ya hay una pestaña para esta carpeta? Si sí, la activamos en vez de
-            // relanzar. Evita duplicar y evita el bug de VS Code reusando ventana
-            // (que dejaba el lanzamiento colgado esperando una ventana que no llega).
-            if (!string.IsNullOrWhiteSpace(carpeta))
+            // Ocultar la ventana adoptada que estuviera visible (SW_HIDE vía el adoptador).
+            if (hwndVisibleActual != IntPtr.Zero)
             {
-                var existente = pestañas.FirstOrDefault(p =>
-                    string.Equals(p.Carpeta, carpeta, StringComparison.OrdinalIgnoreCase));
-                if (existente != null)
-                {
-                    ActivarPestaña(existente);
-                    textoEstado.Text = $"{existente.Titulo} ya está abierto.";
-                    return;
-                }
+                adoptador.OcultarVentana(hwndVisibleActual);
+                hwndVisibleActual = IntPtr.Zero;
             }
 
-            textoEstado.Text = $"Lanzando {programa.NombreMostrado}…";
+            // Ninguna pestaña de IDE queda activa.
+            foreach (var p in pestañas)
+                p.EstaActiva = false;
 
-            IntPtr hwnd = await lanzador.LanzarYEsperar(programa, carpeta);
-            if (hwnd == IntPtr.Zero)
-            {
-                textoEstado.Text = "La ventana no apareció (timeout).";
-                return;
-            }
+            // Ocultar el hueco, mostrar la página propia.
+            marcoHueco.Visibility = Visibility.Collapsed;
+            areaPaginaPropia.Content = pagina;
+            areaPaginaPropia.Visibility = Visibility.Visible;
+        }
 
-            IntPtr hwndContenedor = anfitriona.ObtenerHwndContenedor();
-            anfitriona.UpdateLayout();
-            var (ancho, alto) = DimensionesFisicas();
-
-            if (adoptador.Adoptar(hwnd, hwndContenedor, ancho, alto))
-            {
-                string titulo = string.IsNullOrWhiteSpace(carpeta)
-                    ? programa.NombreMostrado
-                    : System.IO.Path.GetFileName(carpeta.TrimEnd('\\'));
-
-                AgregarPestaña(hwnd, programa, titulo, carpeta);   // ← ahora pasa la carpeta
-                textoEstado.Text = $"{titulo} abierto.";
-            }
-            else textoEstado.Text = "Apareció la ventana pero falló la adopción.";
+        /// <summary>
+        /// Muestra el hueco (para un IDE). Oculta las páginas propias. Es el complemento
+        /// de MostrarPaginaPropia: cuando activás una pestaña de IDE, volvemos al hueco.
+        /// </summary>
+        private void MostrarHueco()
+        {
+            areaPaginaPropia.Visibility = Visibility.Collapsed;
+            areaPaginaPropia.Content = null;
+            marcoHueco.Visibility = Visibility.Visible;
         }
         // Estado del plegado de la sidebar.
 
@@ -461,9 +525,13 @@ namespace OneBlack.Contenedor
                 adoptador.ReajustarTamaño(ancho, alto);
             }), System.Windows.Threading.DispatcherPriority.Render);
         }
-   
+
         // Navegación de espacios — Capa 2: cambiar la vista central.
-        private void navCockpit_Click(object sender, RoutedEventArgs e) { }
+        private void navCockpit_Click(object sender, RoutedEventArgs e)
+        {
+            MostrarPaginaPropia(paginaCockpit);
+            textoEstado.Text = "Cockpit.";
+        }
         private void navProyectos_Click(object sender, RoutedEventArgs e)
         {
             textoEstado.Text = "Vista Proyectos: próximamente.";

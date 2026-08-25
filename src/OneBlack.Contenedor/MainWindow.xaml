@@ -150,15 +150,25 @@
 
                 </DockPanel>
             </Border>
-            <!-- ÁREA CENTRAL: el hueco del reparenting.
-                 IMPORTANTE: el IDE reparentado pinta encima de esta región,
-                 así que NO ponemos nada de WPF sobre el hueco, solo el borde
-                 alrededor. -->
-            <Border Grid.Column="1" Margin="8"
-                    BorderBrush="{StaticResource Accent}" BorderThickness="1"
-                    CornerRadius="0">
-                <core:VentanaAnfitriona x:Name="anfitriona"/>
-            </Border>
+            <!-- ÁREA CENTRAL: dos capas superpuestas.
+                 Capa 1: el hueco del reparenting (IDEs adoptados).
+                 Capa 2: las páginas propias de OneBlack (Cockpit, nueva pestaña).
+                 Se muestra UNA a la vez. Cuando se ve una página propia, la ventana
+                 adoptada se oculta (SW_HIDE), porque el IDE pinta encima de su región
+                 y taparía la página. -->
+            <Grid Grid.Column="1" Margin="8">
+
+                <!-- Capa 1: el hueco (IDEs). Enmarcado en violeta. -->
+                <Border x:Name="marcoHueco"
+                        BorderBrush="{StaticResource Accent}" BorderThickness="1">
+                    <core:VentanaAnfitriona x:Name="anfitriona"/>
+                </Border>
+
+                <!-- Capa 2: contenedor de páginas propias. Encima del hueco, pero solo
+                     visible cuando no hay IDE activo. Su contenido lo pone el code-behind. -->
+                <ContentControl x:Name="areaPaginaPropia" Visibility="Collapsed"/>
+
+            </Grid>
         </Grid>
 
         <!-- ===== STATUSBAR ===== -->

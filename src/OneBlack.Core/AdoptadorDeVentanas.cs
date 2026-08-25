@@ -504,6 +504,17 @@ namespace OneBlack.Core
         }
 
         /// <summary>
+        /// Oculta una ventana adoptada (SW_HIDE) sin devolverla. Se usa al mostrar una
+        /// página propia de OneBlack: la ventana del IDE debe esconderse, no solo taparse,
+        /// porque pinta encima de su región. Sigue adoptada; se vuelve a mostrar con MostrarSolo.
+        /// </summary>
+        public void OcultarVentana(IntPtr hwndVentana)
+        {
+            if (hwndVentana != IntPtr.Zero && IsWindow(hwndVentana))
+                ShowWindow(hwndVentana, SW_HIDE);
+        }
+
+        /// <summary>
         /// La función de subclase que Windows llama por cada mensaje de la ventana
         /// adoptada. Solo nos interesa WM_WINDOWPOSCHANGING: cuando la ventana está por
         /// moverse o redimensionarse, encendemos SWP_NOMOVE|SWP_NOSIZE en la estructura

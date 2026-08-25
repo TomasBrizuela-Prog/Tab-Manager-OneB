@@ -5,27 +5,37 @@ using OneBlack.Core;
 namespace OneBlack.Contenedor
 {
     /// <summary>
-    /// Representa una pestaña de la UI: una ventana adoptada, viva. Es el "dato"
-    /// que la barra de pestañas dibuja. Implementa INotifyPropertyChanged para que
-    /// la UI se actualice sola cuando cambia algo (ej: cuál está activa) — el mismo
-    /// concepto que el binding reactivo de Angular.
+    /// Una pestaña de la UI. Puede estar VACÍA (recién creada con "+", muestra la
+    /// página de nueva pestaña, sin ventana adoptada) u OCUPADA (tiene un IDE
+    /// adoptado). Nace vacía y se transforma en ocupada al adoptar algo en ella
+    /// —como una pestaña de navegador que pasa de "nueva pestaña" a un sitio—.
     /// </summary>
     public class PestañaVentana : INotifyPropertyChanged
     {
-        public IntPtr Hwnd { get; }
-        public ProgramaSoportado Programa { get; }
-        public string Titulo { get; }   // qué mostrar en la pestaña (ej: "RECUPERATORIO")
-
-        public string Carpeta { get; }
-        public PestañaVentana(IntPtr hwnd, ProgramaSoportado programa, string titulo, string carpeta)
+        // Estado OCUPADA: hay una ventana adoptada. IntPtr.Zero = pestaña VACÍA.
+        private IntPtr hwnd = IntPtr.Zero;
+        public IntPtr Hwnd
         {
-            Hwnd = hwnd;
-            Programa = programa;
-            Titulo = titulo;
-            Carpeta = carpeta;
+            get => hwnd;
+            private set { hwnd = value; Notificar(nameof(Hwnd)); Notificar(nameof(EstaVacia)); }
         }
 
-        // Si esta pestaña es la que está mostrándose ahora. La UI la resalta según esto.
+        // Datos del contenido adoptado (null mientras está vacía).
+        public ProgramaSoportado? Programa { get; private set; }
+        public string? Carpeta { get; private set; }
+
+        // ¿La pestaña todavía no tiene nada adoptado? (muestra la página nueva pestaña)
+        public bool EstaVacia => hwnd == IntPtr.Zero;
+
+        // Título mostrado: "Nueva pestaña" mientras está vacía; el del proyecto al ocuparse.
+        private string titulo = "Nueva pestaña";
+        public string Titulo
+        {
+            get => titulo;
+            private set { titulo = value; Notificar(nameof(Titulo)); }
+        }
+
+        // Si es la pestaña que se está mostrando ahora.
         private bool estaActiva;
         public bool EstaActiva
         {
@@ -33,7 +43,21 @@ namespace OneBlack.Contenedor
             set { estaActiva = value; Notificar(nameof(EstaActiva)); }
         }
 
-        // Boilerplate de INotifyPropertyChanged: avisa a la UI que una propiedad cambió.
+        /// <summary>Crea una pestaña VACÍA (nueva pestaña sin contenido).</summary>
+        public PestañaVentana() { }
+
+        /// <summary>
+        /// Transforma una pestaña vacía en OCUPADA: le asigna la ventana adoptada,
+        /// el programa, la carpeta y el título. Es la transición "nueva pestaña → IDE".
+        /// </summary>
+        public void Ocupar(IntPtr hwndAdoptado, ProgramaSoportado programa, string? carpeta, string titulo)
+        {
+            Programa = programa;
+            Carpeta = carpeta;
+            Titulo = titulo;
+            Hwnd = hwndAdoptado;   // setear esto último dispara EstaVacia = false
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
         private void Notificar(string prop) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(prop));
