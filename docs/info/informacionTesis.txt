@@ -120,3 +120,35 @@ Página "nueva pestaña" (próximo objetivo grande): que el "+" abra una página
 Persistencia de proyectos (recientes + fijados): archivo JSON local en %LocalAppData%\OneBlack\, sin cuenta ni login (app local single-user, ya decidido). Mismo mecanismo que PersistenciaEstado ya usa.
 Lanzamientos simultáneos rápidos podrían cruzarse (caso borde); el fix robusto sería identificar la ventana por PID del proceso lanzado, no por "cualquier ventana nueva". No prioritario.
 Arrastrados de antes: detección de cierre externo (RESUELTO esta sesión vía pestañas), adaptar IntelliJ/WebStorm, decisión de firma/distribución (ADR abierto).
+
+27/08
+Foco: adaptar IntelliJ IDEA y WebStorm (Java/Swing), el segundo gran objetivo del catálogo.
+
+Investigación previa (antes de codear):
+
+IntelliJ/WebStorm son Java/Swing, no Chromium — mañas distintas a VS Code.
+El temido "gray box" del reparenting de Java es problema de Linux, no Windows → no aplicaba.
+Riesgo real anticipado: recreación del peer/HWND al reparentar (como el Notepad), splash screen, y single-instance/launcher.
+Groupy (referente comercial de la categoría) es cerrado y no documenta su técnica → confirmado que no hay atajo, hay que descubrir empíricamente. Ángulo de tesis: OneBlack documenta lo que la industria esconde.
+
+Resultado — escenario optimista, mejor de lo esperado:
+
+IntelliJ y WebStorm se adoptan limpio con la maquinaria genérica existente, sin código específico. Se encuadran, el teclado anda, renderizan perfecto.
+NO necesitan --disable-gpu ni el latigazo de repintado que VS Code exigía — Swing no tiene la composición GPU de Chromium.
+El peer/HWND no se recrea al reparentar (a diferencia del Notepad WinUI) — el SetParent prende y se queda.
+Ventanas internas (panel de Run corriendo tests: 14 pasando) y modales (Settings) se comportan bien — el modal abre centrado por encima de OneBlack, que es lo correcto.
+
+Hallazgo de tesis (contraintuitivo): Java/Swing (tecnología más vieja) resultó más fácil de reparentar que Chromium/WinUI (modernas). Las apps modernas con sus propios motores de composición son las difíciles; las tradicionales Win32/Swing se reparentan sin dramas. Refuerza el patrón: cada tecnología de UI tiene sus esquinas, y las modernas traen más.
+
+Problema pendiente de producto — el cartel del launcher JetBrains:
+
+Al abrir un proyecto con instancia existente, IntelliJ/WebStorm muestran "¿ventana actual o nueva?". Se resolvió cambiando la preferencia del IDE a "New window".
+Pero esa config es del IDE del usuario, no de OneBlack → OneBlack no puede garantizarla en cualquier máquina. Anotado como pendiente de producto: manejar el cartel sin depender de la config del usuario (flag de lanzamiento específico de versión, o instancias separadas). No bloquea desarrollo.
+
+Configuración de catálogo: IntelliJ y WebStorm agregados con ruta completa al .exe (no están en PATH), ArgumentosBase = "nosplash", usaCarpeta: true, NombreProceso = idea64 / webstorm64.
+
+Estado: tres IDEs soportados (VS Code, IntelliJ, WebStorm). El objetivo del catálogo cumplido.
+
+Pendientes de pestañas (próxima sesión): resaltar pestaña activa, reordenar por drag & drop, color por proyecto, X para cerrar.
+
+Otros pendientes de fondo (de antes): persistencia de proyectos recientes/fijados, contenido rico de la página nueva pestaña, Cockpit real (consola + proyectos), decisión de firma/distribución (ADR), y el cartel del launcher JetBrains para producto.

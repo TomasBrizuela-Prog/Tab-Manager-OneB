@@ -56,6 +56,13 @@ namespace OneBlack.Core
             // VS Code: lleva --disable-gpu siempre, y usa carpeta.
             new ProgramaSoportado("Code", "Visual Studio Code", CategoriaPrograma.Ide,
                                   "code", "--disable-gpu", usaCarpeta: true),
+            new ProgramaSoportado("idea64", "IntelliJ IDEA", CategoriaPrograma.Ide,
+                      @"C:\Dev\Programas\IntelliJ IDEA 2026.1.3\bin\idea64.exe",
+                      "nosplash", usaCarpeta: true),
+              new ProgramaSoportado("webstorm64", "WebStorm IDEA", CategoriaPrograma.Ide,
+                      @"C:\Dev\Programas\WebStorm 2026.1.3\bin\webstorm64.exe",
+                      "nosplash", usaCarpeta: true),
+
 
             // Ejemplos para el futuro (comentados hasta probarlos):
             // new ProgramaSoportado("idea64",     "IntelliJ IDEA", CategoriaPrograma.Ide, "idea64", "", usaCarpeta: true),
