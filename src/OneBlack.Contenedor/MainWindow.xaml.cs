@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace OneBlack.Contenedor
 {
@@ -55,6 +56,12 @@ namespace OneBlack.Contenedor
         // red de seguridad definitiva: no importa CÓMO se movió, si no está encajado, lo
         // reencaja. Reusa ReajustarTamaño, que ya sabe clavarlo en (0,0).
         private System.Windows.Threading.DispatcherTimer? clavadoTimer;
+
+
+        // Punto donde se apretó el mouse sobre una pestaña, para medir el umbral de arrastre.
+        private Point puntoInicioArrastre;
+        // La pestaña que se está arrastrando (null = no hay arrastre en curso).
+        private PestañaVentana? pestañaArrastrada;
 
         // La colección de pestañas abiertas. ObservableCollection avisa sola a la UI
         // cuando agregás/quitás elementos — como un array reactivo de Angular. El
@@ -229,9 +236,10 @@ namespace OneBlack.Contenedor
         {
             if (pestaña == null) return;
 
+            ResaltarCockpit(false);   // ← apagar el Cockpit al ir a una pestaña de IDE
+
             pestañaActiva = pestaña;
 
-            // Marcar estado activo (la UI resalta la activa).
             foreach (var p in pestañas)
                 p.EstaActiva = (p == pestaña);
 
@@ -312,7 +320,8 @@ namespace OneBlack.Contenedor
                     : System.IO.Path.GetFileName(carpeta.TrimEnd('\\'));
 
                 // TRANSFORMAR la pestaña vacía en ocupada.
-                destino.Ocupar(hwnd, programa, carpeta, titulo);
+                // TRANSFORMAR la pestaña vacía en ocupada.
+                destino.Ocupar(hwnd, programa, carpeta, titulo, AsignarColorPestaña());
 
                 // Mostrarla ya como IDE.
                 ActivarPestaña(destino);
@@ -530,6 +539,10 @@ namespace OneBlack.Contenedor
         private void navCockpit_Click(object sender, RoutedEventArgs e)
         {
             MostrarPaginaPropia(paginaCockpit);
+            ResaltarCockpit(true);                    // ← resaltar Cockpit
+            foreach (var p in pestañas)               // ← apagar las de IDE
+                p.EstaActiva = false;
+            pestañaActiva = null;
             textoEstado.Text = "Cockpit.";
         }
         private void navProyectos_Click(object sender, RoutedEventArgs e)
@@ -543,6 +556,112 @@ namespace OneBlack.Contenedor
         private void navAjustes_Click(object sender, RoutedEventArgs e)
         {
             textoEstado.Text = "Vista Ajustes: próximamente.";
+        }
+
+
+        // Paleta de colores para las pestañas. HOY se asignan rotando por orden.
+        // FUTURO: el color saldrá del proyecto al que pertenece la pestaña, y este
+        // método recibirá el proyecto en vez de rotar. El resto del código no cambia.
+        private static readonly string[] paletaPestañas =
+        {
+    "#58D5CF",  // cian
+    "#A97BF0",  // violeta
+    "#F0A94C",  // naranja
+    "#5CD97B",  // verde
+    "#F06C8C",  // rosa
+    "#6C9CF0",  // azul
+};
+        private int siguienteColor = 0;
+
+        /// <summary>
+        /// Devuelve el color para una pestaña nueva. HOY: rota por la paleta (colores
+        /// distintos por pestaña). FUTURO: recibirá el proyecto y devolverá su color,
+        /// para que pestañas del mismo proyecto compartan color.
+        /// </summary>
+        private string AsignarColorPestaña()
+        {
+            string c = paletaPestañas[siguienteColor % paletaPestañas.Length];
+            siguienteColor++;
+            return c;
+        }
+
+        /// <summary>
+        /// Resalta o apaga la pestaña Cockpit. Se llama al entrar al Cockpit (resaltar)
+        /// y al activar una pestaña de IDE (apagar). Reemplaza el resaltado hardcodeado
+        /// que dejaba Cockpit siempre encendido.
+        /// </summary>
+        private void ResaltarCockpit(bool activo)
+        {
+            btnCockpit.Background = activo
+                ? (System.Windows.Media.Brush)FindResource("TabBg")
+                : System.Windows.Media.Brushes.Transparent;
+            btnCockpit.BorderBrush = activo
+                ? (System.Windows.Media.Brush)FindResource("TabEdge")
+                : System.Windows.Media.Brushes.Transparent;
+            btnCockpit.Foreground = activo
+                ? (System.Windows.Media.Brush)FindResource("Fg")
+                : (System.Windows.Media.Brush)FindResource("Dim");
+        }
+
+        /// <summary>
+        /// Registra dónde empezó el gesto. No arranca el arrastre todavía: distinguir un
+        /// click de un arrastre depende de cuánto se MUEVE el mouse (ver Pestaña_MouseMove).
+        /// </summary>
+        private void Pestaña_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            // GetPosition(null) da la posición relativa a la raíz visual: sirve como
+            // referencia consistente entre el down y el move.
+            puntoInicioArrastre = e.GetPosition(null);
+        }
+
+        /// <summary>
+        /// Si el mouse se movió más que el umbral del sistema con el botón apretado,
+        /// arranca el arrastre. Debajo del umbral es un click normal → sigue activando
+        /// la pestaña por Pestaña_Click (no se pisan: DoDragDrop solo corre si hubo drag).
+        /// </summary>
+        private void Pestaña_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed) return;
+
+            // Vector = resta de dos Point en WPF (da el desplazamiento X/Y).
+            Vector desplazamiento = e.GetPosition(null) - puntoInicioArrastre;
+
+            if (Math.Abs(desplazamiento.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(desplazamiento.Y) < SystemParameters.MinimumVerticalDragDistance)
+                return;
+
+            // 'is' con patrón: castea y chequea null en un paso. fe = el Button; su
+            // DataContext es la PestañaVentana que dibuja el DataTemplate.
+            if (sender is FrameworkElement fe && fe.DataContext is PestañaVentana pestaña)
+            {
+                pestañaArrastrada = pestaña;
+                // DoDragDrop es MODAL: bloquea acá hasta que el usuario suelta. Cuando
+                // vuelve, el arrastre terminó, así que limpiamos la referencia.
+                DragDrop.DoDragDrop(fe, pestaña, DragDropEffects.Move);
+                pestañaArrastrada = null;
+            }
+        }
+
+        /// <summary>
+        /// Mientras el mouse pasa por encima de otra pestaña durante el arrastre, mueve
+        /// la arrastrada a esa posición. ObservableCollection.Move avisa a la UI sola,
+        /// así que las pestañas se deslizan en vivo siguiendo al cursor.
+        /// </summary>
+        private void Pestaña_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effects = DragDropEffects.Move;
+
+            if (pestañaArrastrada == null) return;
+            // 'is not' = patrón negado. Si el sender no es una pestaña, salimos.
+            if (sender is not FrameworkElement fe || fe.DataContext is not PestañaVentana objetivo) return;
+            if (objetivo == pestañaArrastrada) return;
+
+            int desde = pestañas.IndexOf(pestañaArrastrada);
+            int hasta = pestañas.IndexOf(objetivo);
+            if (desde < 0 || hasta < 0) return;
+
+            pestañas.Move(desde, hasta);   // reordena en vivo
+            e.Handled = true;
         }
     }
 }

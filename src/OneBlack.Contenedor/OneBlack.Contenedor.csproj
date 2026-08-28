@@ -1,11 +1,20 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <None Remove="Recursos\oneblack.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Recursos\oneblack.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\OneBlack.Core\OneBlack.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+	  <ApplicationIcon>Recursos\oneblack.ico</ApplicationIcon>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

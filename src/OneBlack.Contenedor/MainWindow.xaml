@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:core="clr-namespace:OneBlack.Core;assembly=OneBlack.Core"
         Title="OneBlack" Height="700" Width="1100"
+        Icon="Recursos/oneblack.ico"
         Background="{StaticResource App}">
 
     <!-- Grid raíz: 3 filas → titlebar / cuerpo / statusbar -->
@@ -13,7 +14,7 @@
             <RowDefinition Height="*"/>
             <!-- cuerpo -->
             <RowDefinition Height="28"/>
-            <!-- statusbar (más fina, como el modelo) -->
+            <!-- statusbar -->
         </Grid.RowDefinitions>
 
         <!-- ===== TITLEBAR: pestañas + acciones ===== -->
@@ -26,26 +27,27 @@
                     <ColumnDefinition Width="*"/>
                     <!-- espacio flexible -->
                     <ColumnDefinition Width="Auto"/>
-                    <!-- acción provisoria + controles -->
+                    <!-- acción provisoria -->
                 </Grid.ColumnDefinitions>
 
                 <!-- Pestañas: Cockpit fija + pestañas de IDE dinámicas -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
 
-                    <!-- Pestaña Cockpit (fija, siempre presente) -->
-                    <Button Style="{StaticResource TabButton}"
-                            Background="{StaticResource TabBg}"
-                            BorderBrush="{StaticResource TabEdge}"
-                            Foreground="{StaticResource Fg}"
+        
+                    <!-- Pestaña Cockpit (fija). Su resaltado lo maneja el code-behind
+                         (ResaltarCockpit), para que no quede siempre encendida. -->
+                    <Button x:Name="btnCockpit" Style="{StaticResource TabButton}"
+                            Foreground="{StaticResource Dim}"
                             Click="navCockpit_Click">
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
-                                     VerticalAlignment="Center" Margin="0,0,9,0"/>
+                            <Ellipse Width="6" Height="6" Fill="{StaticResource Accent}"
+         VerticalAlignment="Center" Margin="0,0,9,0"/>
                             <TextBlock Text="Cockpit" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
 
-                    <!-- Pestañas dinámicas: una por ventana adoptada -->
+                    <!-- Pestañas dinámicas: una por ventana adoptada.
+                         La activa se resalta vía el DataTrigger sobre EstaActiva. -->
                     <ItemsControl x:Name="barraPestañas">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -54,17 +56,43 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <!-- Cada pestaña: botón con dot + título. Se resalta si EstaActiva. -->
-                                <Button Style="{StaticResource TabButton}" Click="Pestaña_Click">
-                                    <Button.Resources>
-                                        <!-- Resalta la pestaña activa (fondo + borde), como Cockpit. -->
-                                        <Style TargetType="Button" BasedOn="{StaticResource TabButton}"/>
-                                    </Button.Resources>
-                                    <StackPanel Orientation="Horizontal">
-                                        <Ellipse Width="6" Height="6" Fill="{StaticResource Data}"
-                                                 VerticalAlignment="Center" Margin="0,0,9,0"/>
-                                        <TextBlock Text="{Binding Titulo}" VerticalAlignment="Center"/>
-                                    </StackPanel>
+                                <Button Click="Pestaña_Click" Cursor="Hand"
+        AllowDrop="True"
+        PreviewMouseLeftButtonDown="Pestaña_MouseDown"
+        PreviewMouseMove="Pestaña_MouseMove"
+        DragOver="Pestaña_DragOver">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="bd"
+                                                    Background="Transparent"
+                                                    BorderBrush="Transparent"
+                                                    BorderThickness="1"
+                                                    CornerRadius="9"
+                                                    Padding="14,0" Height="32">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Ellipse Width="6" Height="6" Fill="{Binding Color}"
+         VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                                    <TextBlock x:Name="txt" Text="{Binding Titulo}"
+                                                               Foreground="{StaticResource Dim}"
+                                                               VerticalAlignment="Center" FontSize="12.5"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <!-- Hover: fondo sutil -->
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="bd" Property="Background" Value="#111017"/>
+                                                    <Setter TargetName="txt" Property="Foreground" Value="{StaticResource Fg2}"/>
+                                                </Trigger>
+                                                <!-- ACTIVA: resaltada (fondo + borde violeta, texto claro).
+                                                     Reacciona a EstaActiva, que ya se setea en ActivarPestaña. -->
+                                                <DataTrigger Binding="{Binding EstaActiva}" Value="True">
+                                                    <Setter TargetName="bd" Property="Background" Value="{StaticResource TabBg}"/>
+                                                    <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource TabEdge}"/>
+                                                    <Setter TargetName="txt" Property="Foreground" Value="{StaticResource Fg}"/>
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
                                 </Button>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -75,12 +103,11 @@
                             Content="+" FontSize="16" Padding="10,0"
                             Foreground="{StaticResource Dim}"
                             Click="botonAgregar_Click"
-                            ToolTip="Agregar ventana (próximamente)"/>
+                            ToolTip="Nueva pestaña"/>
                 </StackPanel>
 
-                <!-- Acción provisoria (se saca cuando el "+" funcione) + controles de ventana -->
+                <!-- Acción provisoria (atajo de testeo) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- PROVISORIO: lanzar proyecto de prueba, para seguir testeando. -->
                     <Button Content="▸ prueba" Style="{StaticResource TabButton}"
                             Foreground="{StaticResource Dim}"
                             Click="botonProyectoPrueba_Click"
@@ -89,13 +116,13 @@
             </Grid>
         </Border>
 
-        <!-- ===== CUERPO: sidebar + hueco ===== -->
+        <!-- ===== CUERPO: sidebar + área central ===== -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="colSidebar" Width="212"/>
                 <!-- sidebar -->
                 <ColumnDefinition Width="*"/>
-                <!-- área central (hueco) -->
+                <!-- área central -->
             </Grid.ColumnDefinitions>
 
             <!-- SIDEBAR de identidad -->
@@ -150,12 +177,12 @@
 
                 </DockPanel>
             </Border>
+
             <!-- ÁREA CENTRAL: dos capas superpuestas.
                  Capa 1: el hueco del reparenting (IDEs adoptados).
                  Capa 2: las páginas propias de OneBlack (Cockpit, nueva pestaña).
-                 Se muestra UNA a la vez. Cuando se ve una página propia, la ventana
-                 adoptada se oculta (SW_HIDE), porque el IDE pinta encima de su región
-                 y taparía la página. -->
+                 Se muestra UNA a la vez; al mostrar una página propia, la ventana
+                 adoptada se oculta (SW_HIDE) porque el IDE pinta encima de su región. -->
             <Grid Grid.Column="1" Margin="8">
 
                 <!-- Capa 1: el hueco (IDEs). Enmarcado en violeta. -->
@@ -164,8 +191,7 @@
                     <core:VentanaAnfitriona x:Name="anfitriona"/>
                 </Border>
 
-                <!-- Capa 2: contenedor de páginas propias. Encima del hueco, pero solo
-                     visible cuando no hay IDE activo. Su contenido lo pone el code-behind. -->
+                <!-- Capa 2: contenedor de páginas propias. -->
                 <ContentControl x:Name="areaPaginaPropia" Visibility="Collapsed"/>
 
             </Grid>
@@ -175,12 +201,10 @@
         <Border Grid.Row="2" Background="{StaticResource Chrome}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0">
-                <!-- Info estática del modelo -->
                 <TextBlock Text="feature/reservas" Foreground="{StaticResource Dim}"
                            FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
                 <TextBlock Text="  ·  " Foreground="{StaticResource Faint}"
                            FontFamily="Consolas" FontSize="11" VerticalAlignment="Center"/>
-                <!-- textoEstado: mensajes reales que el code-behind ya escribe -->
                 <TextBlock x:Name="textoEstado" Text="Listo."
                            Foreground="{StaticResource Dim}"
                            FontFamily="Consolas" FontSize="11"

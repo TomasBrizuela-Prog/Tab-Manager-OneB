@@ -29,6 +29,17 @@ namespace OneBlack.Contenedor
 
         // Título mostrado: "Nueva pestaña" mientras está vacía; el del proyecto al ocuparse.
         private string titulo = "Nueva pestaña";
+
+        // Color identificador de la pestaña (el puntito). HOY: rotativo por pestaña.
+        // FUTURO: será el color del PROYECTO al que pertenece (mismo proyecto =
+        // mismo color, aunque sean carpetas distintas). Por eso vive acá como dato:
+        // cuando exista el sistema de proyectos, solo cambia QUIÉN lo asigna, no esto.
+        private string color = "#58D5CF";   // valor por defecto (cian), se sobreescribe al ocupar
+        public string Color
+        {
+            get => color;
+            set { color = value; Notificar(nameof(Color)); }
+        }
         public string Titulo
         {
             get => titulo;
@@ -50,11 +61,12 @@ namespace OneBlack.Contenedor
         /// Transforma una pestaña vacía en OCUPADA: le asigna la ventana adoptada,
         /// el programa, la carpeta y el título. Es la transición "nueva pestaña → IDE".
         /// </summary>
-        public void Ocupar(IntPtr hwndAdoptado, ProgramaSoportado programa, string? carpeta, string titulo)
+        public void Ocupar(IntPtr hwndAdoptado, ProgramaSoportado programa, string? carpeta, string titulo, string color)
         {
             Programa = programa;
             Carpeta = carpeta;
             Titulo = titulo;
+            Color = color;
             Hwnd = hwndAdoptado;   // setear esto último dispara EstaVacia = false
         }
 
