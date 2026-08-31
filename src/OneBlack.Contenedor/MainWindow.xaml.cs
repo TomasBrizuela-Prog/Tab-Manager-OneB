@@ -40,6 +40,10 @@ namespace OneBlack.Contenedor
         // La guardamos para poder CANCELARLA si Devolver corre antes de que se ejecute
         private System.Windows.Threading.DispatcherOperation? encajeDiferido;
 
+
+        private readonly RepositorioDeProyectos repositorio = new();
+        private readonly PaginaProyectos paginaProyectos = new();
+
         // Campo que recuerda qué ventana adoptada se está mostrando, para poder
         // re-enfocarla cuando OneBlack recupere la activación (ej: tras una notificación
         // del IDE que robó el foco).
@@ -96,6 +100,13 @@ namespace OneBlack.Contenedor
             {
                 var (ancho, alto) = DimensionesFisicas();
                 adoptador.ReajustarTamaño(ancho, alto);
+            };
+            paginaProyectos.SePidioNuevoProyecto += NuevoProyecto;
+            paginaProyectos.SeEligioAbrir += async p => await AbrirProyecto(p);
+            paginaProyectos.SePidioEliminar += p =>
+            {
+                repositorio.Eliminar(p.Id);
+                paginaProyectos.Refrescar(repositorio.CargarTodos());   // recargar la lista
             };
         }
 
@@ -274,7 +285,7 @@ namespace OneBlack.Contenedor
         /// Lanza un programa y, cuando aparece su ventana, la adopta EN LA PESTAÑA ACTIVA
         /// (la transforma de vacía a ocupada). Es el flujo "elegí algo en la nueva pestaña".
         /// </summary>
-        private async Task AbrirEnPestañaActiva(ProgramaSoportado programa, string? carpeta)
+        private async Task AbrirEnPestañaActiva(ProgramaSoportado programa, string? carpeta, string? colorProyecto = null)
         {
             // Guarda anti-duplicado: si ya hay una pestaña OCUPADA con esta carpeta, activá esa.
             if (!string.IsNullOrWhiteSpace(carpeta))
@@ -320,8 +331,7 @@ namespace OneBlack.Contenedor
                     : System.IO.Path.GetFileName(carpeta.TrimEnd('\\'));
 
                 // TRANSFORMAR la pestaña vacía en ocupada.
-                // TRANSFORMAR la pestaña vacía en ocupada.
-                destino.Ocupar(hwnd, programa, carpeta, titulo, AsignarColorPestaña());
+                destino.Ocupar(hwnd, programa, carpeta, titulo, colorProyecto ?? AsignarColorPestaña());
 
                 // Mostrarla ya como IDE.
                 ActivarPestaña(destino);
@@ -458,7 +468,40 @@ namespace OneBlack.Contenedor
             return (anchoFisico, altoFisico);
         }
 
+        /// <summary>
+        /// Cierra la pestaña: devuelve su ventana adoptada intacta al escritorio y la saca
+        /// de la barra. Si estaba vacía (sin IDE), solo la saca. Si era la pestaña activa,
+        /// activa la primera que quede, o vuelve al Cockpit si no queda ninguna.
+        /// </summary>
+        private void CerrarPestaña_Click(object sender, RoutedEventArgs e)
+        {
+            // 'is not': si el sender no trae una PestañaVentana en su DataContext, salimos.
+            if (sender is not FrameworkElement fe || fe.DataContext is not PestañaVentana pestaña)
+                return;
 
+            // Si tiene un IDE adoptado, devolvérselo al escritorio antes de sacarla.
+            if (!pestaña.EstaVacia)
+                adoptador.Devolver(pestaña.Hwnd, anfitriona.ObtenerHwndContenedor());
+
+            // Si la que cerramos era la visible, ya no hay nada visible.
+            if (hwndVisibleActual == pestaña.Hwnd)
+                hwndVisibleActual = IntPtr.Zero;
+
+            bool eraActiva = (pestañaActiva == pestaña);
+            pestañas.Remove(pestaña);
+            if (eraActiva) pestañaActiva = null;
+
+            // Elegir qué mostrar tras cerrar (mismo criterio que LimpiarPestañasMuertas).
+            if (eraActiva)
+            {
+                if (pestañas.Count > 0)
+                    ActivarPestaña(pestañas[0]);
+                else
+                    navCockpit_Click(this, new RoutedEventArgs());
+            }
+
+            textoEstado.Text = "Pestaña cerrada.";
+        }
 
         // ===== Handlers del chrome, cableados en seco (se conectan en su módulo) =====
 
@@ -524,9 +567,17 @@ namespace OneBlack.Contenedor
             sidebarPlegada = !sidebarPlegada;
             colSidebar.Width = new GridLength(sidebarPlegada ? 56 : 212);
             LabelsVisibles = !sidebarPlegada;   // los labels reaccionan solos vía binding
-            txtWordmark.Visibility = txtHub.Visibility = txtGrupoEspacio.Visibility =
-                sidebarPlegada ? Visibility.Collapsed : Visibility.Visible;
+
+            // Plegada: ocultamos el logo y centramos el botón » (ocupa el lugar del logo).
+            // Abierta: mostramos logo+wordmark a la izquierda y el botón « a la derecha.
+            panelLogo.Visibility = sidebarPlegada ? Visibility.Collapsed : Visibility.Visible;
+            botonPlegar.HorizontalAlignment = sidebarPlegada
+                ? HorizontalAlignment.Center
+                : HorizontalAlignment.Right;
             botonPlegar.Content = sidebarPlegada ? "»" : "«";
+
+            txtHub.Visibility = txtGrupoEspacio.Visibility =
+                sidebarPlegada ? Visibility.Collapsed : Visibility.Visible;
 
             Dispatcher.BeginInvoke(new Action(() =>
             {
@@ -534,7 +585,6 @@ namespace OneBlack.Contenedor
                 adoptador.ReajustarTamaño(ancho, alto);
             }), System.Windows.Threading.DispatcherPriority.Render);
         }
-
         // Navegación de espacios — Capa 2: cambiar la vista central.
         private void navCockpit_Click(object sender, RoutedEventArgs e)
         {
@@ -547,7 +597,55 @@ namespace OneBlack.Contenedor
         }
         private void navProyectos_Click(object sender, RoutedEventArgs e)
         {
-            textoEstado.Text = "Vista Proyectos: próximamente.";
+            paginaProyectos.Refrescar(repositorio.CargarTodos());
+            MostrarPaginaPropia(paginaProyectos);
+            foreach (var p in pestañas) p.EstaActiva = false;
+            pestañaActiva = null;
+            ResaltarCockpit(false);
+            textoEstado.Text = "Proyectos.";
+        }
+
+        /// <summary>
+        /// Abre el diálogo de alta de proyecto. Si el usuario guarda, lo persiste y refresca
+        /// la lista de recientes. Owner = this para que el diálogo salga centrado sobre OneBlack.
+        /// </summary>
+        private void NuevoProyecto()
+        {
+            var dialogo = new VentanaNuevoProyecto { Owner = this };
+            dialogo.ShowDialog();
+            if (dialogo.Resultado == null) return;   // canceló
+
+            repositorio.Guardar(dialogo.Resultado);
+            paginaProyectos.Refrescar(repositorio.CargarTodos());
+            textoEstado.Text = $"Proyecto \"{dialogo.Resultado.Nombre}\" guardado.";
+        }
+
+        /// <summary>
+        /// Abre un proyecto: lanza cada una de sus carpetas como pestaña, todas con el color
+        /// del proyecto. Saltea las que ya estén abiertas (no duplica). Marca el proyecto como
+        /// usado para que suba en recientes.
+        /// </summary>
+        private async Task AbrirProyecto(Proyecto proyecto)
+        {
+            foreach (var carpeta in proyecto.Carpetas)
+            {
+                var programa = CatalogoDeProgramas.Buscar(carpeta.ProgramaId);
+                if (programa == null) continue;   // el programa ya no está en el catálogo
+
+                // Si ya hay una pestaña con esa carpeta, no la duplicamos.
+                bool yaAbierta = pestañas.Any(p => !p.EstaVacia &&
+                    string.Equals(p.Carpeta, carpeta.Ruta, StringComparison.OrdinalIgnoreCase));
+                if (yaAbierta) continue;
+
+                // Crear pestaña vacía y abrir en ella con el color del proyecto.
+                var nueva = new PestañaVentana();
+                pestañas.Add(nueva);
+                ActivarPestaña(nueva);
+                await AbrirEnPestañaActiva(programa, carpeta.Ruta, proyecto.Color);
+            }
+
+            repositorio.MarcarUsado(proyecto.Id);
+            textoEstado.Text = $"Proyecto \"{proyecto.Nombre}\" abierto.";
         }
         private void navGit_Click(object sender, RoutedEventArgs e)
         {
@@ -562,15 +660,7 @@ namespace OneBlack.Contenedor
         // Paleta de colores para las pestañas. HOY se asignan rotando por orden.
         // FUTURO: el color saldrá del proyecto al que pertenece la pestaña, y este
         // método recibirá el proyecto en vez de rotar. El resto del código no cambia.
-        private static readonly string[] paletaPestañas =
-        {
-    "#58D5CF",  // cian
-    "#A97BF0",  // violeta
-    "#F0A94C",  // naranja
-    "#5CD97B",  // verde
-    "#F06C8C",  // rosa
-    "#6C9CF0",  // azul
-};
+        private static readonly string[] paletaPestañas = PaletaProyectos.Colores;
         private int siguienteColor = 0;
 
         /// <summary>

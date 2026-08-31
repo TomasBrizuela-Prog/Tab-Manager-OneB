@@ -1,0 +1,183 @@
+﻿<Window x:Class="OneBlack.Contenedor.VentanaNuevoProyecto"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Nuevo proyecto" Height="620" Width="560"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource App}"
+        ResizeMode="NoResize">
+    <Window.Resources>
+        <!-- Campo de texto oscuro -->
+        <Style x:Key="CampoTexto" TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource Panel}"/>
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="CaretBrush" Value="{StaticResource Fg}"/>
+        </Style>
+        <!-- Botón secundario (Cancelar / Agregar / quitar) -->
+        <Style x:Key="BotonAccion" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource Fg2}"/>
+            <Setter Property="Background" Value="{StaticResource Panel}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource Line}" BorderThickness="1"
+                                CornerRadius="7" Padding="13,7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#1B1A22"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- Botón primario (Guardar) -->
+        <Style x:Key="BotonPrimario" TargetType="Button">
+            <Setter Property="Foreground" Value="#0C0B10"/>
+            <Setter Property="Background" Value="{StaticResource Accent}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                CornerRadius="7" Padding="18,7">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- título -->
+            <RowDefinition Height="Auto"/>
+            <!-- nombre -->
+            <RowDefinition Height="Auto"/>
+            <!-- header carpetas -->
+            <RowDefinition Height="*"/>
+            <!-- lista carpetas -->
+            <RowDefinition Height="Auto"/>
+            <!-- color -->
+            <RowDefinition Height="Auto"/>
+            <!-- botones -->
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Nuevo proyecto" Foreground="{StaticResource Fg}"
+                   FontSize="18" FontFamily="Consolas" Margin="0,0,0,18"/>
+
+        <!-- Nombre -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,18">
+            <TextBlock Text="NOMBRE" Foreground="{StaticResource Ghost}"
+                       FontFamily="Consolas" FontSize="10" Margin="0,0,0,6"/>
+            <TextBox x:Name="txtNombre" Style="{StaticResource CampoTexto}"/>
+        </StackPanel>
+
+        <!-- Header de carpetas -->
+        <Grid Grid.Row="2" Margin="0,0,0,8">
+            <TextBlock Text="CARPETAS" Foreground="{StaticResource Ghost}"
+                       FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"/>
+            <Button Content="+ Agregar carpeta" HorizontalAlignment="Right"
+                    Style="{StaticResource BotonAccion}" Click="AgregarCarpeta_Click"/>
+        </Grid>
+
+        <!-- Lista de carpetas -->
+        <Border Grid.Row="3" Background="{StaticResource Chrome}"
+                BorderBrush="{StaticResource Line}" BorderThickness="1"
+                CornerRadius="8" Padding="10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <ItemsControl x:Name="listaCarpetas">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Ruta}"
+                                               Foreground="{StaticResource Fg2}" FontSize="11.5"
+                                               FontFamily="Consolas" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" ToolTip="{Binding Ruta}"/>
+                                    <ComboBox Grid.Column="1" Width="160" Margin="10,0"
+                                              ItemsSource="{Binding Programas}"
+                                              SelectedItem="{Binding ProgramaSeleccionado}"
+                                              DisplayMemberPath="NombreMostrado"
+                                              VerticalAlignment="Center"/>
+                                    <Button Grid.Column="2" Content="✕" Click="QuitarCarpeta_Click"
+                                            Style="{StaticResource BotonAccion}"
+                                            ToolTip="Quitar carpeta" Padding="0"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock x:Name="txtVacio" Text="Todavía no agregaste carpetas."
+                               Foreground="{StaticResource Faint}" FontSize="11.5"
+                               FontFamily="Consolas" Margin="4,6"/>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Selector de color -->
+        <StackPanel Grid.Row="4" Margin="0,18,0,18">
+            <TextBlock Text="COLOR" Foreground="{StaticResource Ghost}"
+                       FontFamily="Consolas" FontSize="10" Margin="0,0,0,8"/>
+            <ItemsControl x:Name="listaColores">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Click="Color_Click" Cursor="Hand" Margin="0,0,10,0">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="sw" Width="30" Height="30" CornerRadius="15"
+                                            Background="{Binding Hex}"
+                                            BorderBrush="Transparent" BorderThickness="2">
+                                        <Border Width="16" Height="16" CornerRadius="8"
+                                                Background="#0C0B10" x:Name="centro"
+                                                Visibility="Collapsed"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Seleccionado}" Value="True">
+                                            <Setter TargetName="sw" Property="BorderBrush" Value="{StaticResource Fg}"/>
+                                            <Setter TargetName="centro" Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+
+        <!-- Botones -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancelar" Style="{StaticResource BotonAccion}"
+                    Click="Cancelar_Click" Margin="0,0,10,0"/>
+            <Button Content="Guardar proyecto" Style="{StaticResource BotonPrimario}"
+                    Click="Guardar_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

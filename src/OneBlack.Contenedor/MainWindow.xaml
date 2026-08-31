@@ -5,8 +5,7 @@
         Title="OneBlack" Height="700" Width="1100"
         Icon="Recursos/oneblack.ico"
         Background="{StaticResource App}">
-
-    <!-- Grid raíz: 3 filas → titlebar / cuerpo / statusbar -->
+    <!-- Grid raíz: 3 filas -> titlebar / cuerpo / statusbar -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="48"/>
@@ -16,7 +15,6 @@
             <RowDefinition Height="28"/>
             <!-- statusbar -->
         </Grid.RowDefinitions>
-
         <!-- ===== TITLEBAR: pestañas + acciones ===== -->
         <Border Grid.Row="0" Background="{StaticResource Chrome}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
@@ -29,11 +27,9 @@
                     <ColumnDefinition Width="Auto"/>
                     <!-- acción provisoria -->
                 </Grid.ColumnDefinitions>
-
                 <!-- Pestañas: Cockpit fija + pestañas de IDE dinámicas -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
 
-        
                     <!-- Pestaña Cockpit (fija). Su resaltado lo maneja el code-behind
                          (ResaltarCockpit), para que no quede siempre encendida. -->
                     <Button x:Name="btnCockpit" Style="{StaticResource TabButton}"
@@ -41,11 +37,10 @@
                             Click="navCockpit_Click">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="6" Height="6" Fill="{StaticResource Accent}"
-         VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                     VerticalAlignment="Center" Margin="0,0,9,0"/>
                             <TextBlock Text="Cockpit" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-
                     <!-- Pestañas dinámicas: una por ventana adoptada.
                          La activa se resalta vía el DataTrigger sobre EstaActiva. -->
                     <ItemsControl x:Name="barraPestañas">
@@ -57,10 +52,10 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Button Click="Pestaña_Click" Cursor="Hand"
-        AllowDrop="True"
-        PreviewMouseLeftButtonDown="Pestaña_MouseDown"
-        PreviewMouseMove="Pestaña_MouseMove"
-        DragOver="Pestaña_DragOver">
+                                        AllowDrop="True"
+                                        PreviewMouseLeftButtonDown="Pestaña_MouseDown"
+                                        PreviewMouseMove="Pestaña_MouseMove"
+                                        DragOver="Pestaña_DragOver">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
                                             <Border x:Name="bd"
@@ -71,24 +66,48 @@
                                                     Padding="14,0" Height="32">
                                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                     <Ellipse Width="6" Height="6" Fill="{Binding Color}"
-         VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                                             VerticalAlignment="Center" Margin="0,0,9,0"/>
                                                     <TextBlock x:Name="txt" Text="{Binding Titulo}"
                                                                Foreground="{StaticResource Dim}"
                                                                VerticalAlignment="Center" FontSize="12.5"/>
+                                                    <!-- Botón X: cierra la pestaña. Nace Collapsed y se revela
+                                                         en hover / cuando la pestaña está activa (ver triggers). -->
+                                                    <Button x:Name="btnCerrar" Click="CerrarPestaña_Click"
+                                                            Visibility="Collapsed" Cursor="Hand"
+                                                            Margin="8,0,0,0" VerticalAlignment="Center"
+                                                            ToolTip="Cerrar pestaña">
+                                                        <Button.Template>
+                                                            <ControlTemplate TargetType="Button">
+                                                                <Border x:Name="cerrarBd" Width="16" Height="16" CornerRadius="4"
+                                                                        Background="Transparent">
+                                                                    <TextBlock Text="✕" FontSize="9"
+                                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                               Foreground="{StaticResource Dim}"/>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="cerrarBd" Property="Background" Value="#2A2A33"/>
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Button.Template>
+                                                    </Button>
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
-                                                <!-- Hover: fondo sutil -->
+                                                <!-- Hover: fondo sutil + revelar la X -->
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter TargetName="bd" Property="Background" Value="#111017"/>
                                                     <Setter TargetName="txt" Property="Foreground" Value="{StaticResource Fg2}"/>
+                                                    <Setter TargetName="btnCerrar" Property="Visibility" Value="Visible"/>
                                                 </Trigger>
-                                                <!-- ACTIVA: resaltada (fondo + borde violeta, texto claro).
+                                                <!-- ACTIVA: resaltada (fondo + borde violeta, texto claro) + X siempre visible.
                                                      Reacciona a EstaActiva, que ya se setea en ActivarPestaña. -->
                                                 <DataTrigger Binding="{Binding EstaActiva}" Value="True">
                                                     <Setter TargetName="bd" Property="Background" Value="{StaticResource TabBg}"/>
                                                     <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource TabEdge}"/>
                                                     <Setter TargetName="txt" Property="Foreground" Value="{StaticResource Fg}"/>
+                                                    <Setter TargetName="btnCerrar" Property="Visibility" Value="Visible"/>
                                                 </DataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -97,7 +116,6 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-
                     <!-- Botón "+" para agregar/adoptar ventana -->
                     <Button x:Name="botonAgregar" Style="{StaticResource TabButton}"
                             Content="+" FontSize="16" Padding="10,0"
@@ -105,7 +123,6 @@
                             Click="botonAgregar_Click"
                             ToolTip="Nueva pestaña"/>
                 </StackPanel>
-
                 <!-- Acción provisoria (atajo de testeo) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="▸ prueba" Style="{StaticResource TabButton}"
@@ -115,7 +132,6 @@
                 </StackPanel>
             </Grid>
         </Border>
-
         <!-- ===== CUERPO: sidebar + área central ===== -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
@@ -124,30 +140,30 @@
                 <ColumnDefinition Width="*"/>
                 <!-- área central -->
             </Grid.ColumnDefinitions>
-
             <!-- SIDEBAR de identidad -->
             <Border Grid.Column="0" Background="{StaticResource Chrome}"
                     BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
                 <DockPanel Margin="8,16,8,12">
-
                     <!-- Cabecera: logo + wordmark + toggle -->
                     <Grid DockPanel.Dock="Top" Margin="4,0,4,18">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <Border Width="24" Height="24" CornerRadius="5"
-                                    Background="{StaticResource Accent}"/>
+                        <!-- Logo + wordmark: se muestran solo con la sidebar abierta -->
+                        <StackPanel x:Name="panelLogo" Orientation="Horizontal"
+                HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Image Source="Recursos/oneblack.ico" Width="24" Height="24"
+               RenderOptions.BitmapScalingMode="HighQuality"/>
                             <TextBlock x:Name="txtWordmark" Text="OneBlack"
-                                       Foreground="{StaticResource Fg}"
-                                       FontSize="13" FontFamily="Consolas"
-                                       VerticalAlignment="Center" Margin="10,0,0,0"/>
+                   Foreground="{StaticResource Fg}"
+                   FontSize="13" FontFamily="Consolas"
+                   VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
+                        <!-- Botón plegar/desplegar. Abierta: a la derecha («). Plegada: centrado (»). -->
                         <Button x:Name="botonPlegar" Content="«"
-                                HorizontalAlignment="Right" VerticalAlignment="Center"
-                                Style="{StaticResource TabButton}"
-                                Background="{StaticResource Panel}"
-                                Foreground="{StaticResource Fg2}" Padding="8,2"
-                                Click="botonPlegar_Click"/>
+            HorizontalAlignment="Right" VerticalAlignment="Center"
+            Style="{StaticResource TabButton}"
+            Background="{StaticResource Panel}"
+            Foreground="{StaticResource Fg2}" Padding="8,2"
+            Click="botonPlegar_Click"/>
                     </Grid>
-
                     <!-- Pie: estado del hub -->
                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                                 Margin="6,0" VerticalAlignment="Bottom">
@@ -158,13 +174,11 @@
                                    FontFamily="Consolas" FontSize="11"
                                    VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
-
                     <!-- Navegación de espacios -->
                     <StackPanel x:Name="navEspacio">
                         <TextBlock x:Name="txtGrupoEspacio" Text="ESPACIO"
                                    Foreground="{StaticResource Ghost}"
                                    FontFamily="Consolas" FontSize="10" Margin="9,0,0,8"/>
-
                         <Button Style="{StaticResource SideItem}" Tag="C" Content="Cockpit"
                                 Click="navCockpit_Click"/>
                         <Button Style="{StaticResource SideItem}" Tag="P" Content="Proyectos"
@@ -174,29 +188,23 @@
                         <Button Style="{StaticResource SideItem}" Tag="A" Content="Ajustes"
                                 Click="navAjustes_Click"/>
                     </StackPanel>
-
                 </DockPanel>
             </Border>
-
             <!-- ÁREA CENTRAL: dos capas superpuestas.
                  Capa 1: el hueco del reparenting (IDEs adoptados).
                  Capa 2: las páginas propias de OneBlack (Cockpit, nueva pestaña).
                  Se muestra UNA a la vez; al mostrar una página propia, la ventana
                  adoptada se oculta (SW_HIDE) porque el IDE pinta encima de su región. -->
             <Grid Grid.Column="1" Margin="8">
-
                 <!-- Capa 1: el hueco (IDEs). Enmarcado en violeta. -->
                 <Border x:Name="marcoHueco"
                         BorderBrush="{StaticResource Accent}" BorderThickness="1">
                     <core:VentanaAnfitriona x:Name="anfitriona"/>
                 </Border>
-
                 <!-- Capa 2: contenedor de páginas propias. -->
                 <ContentControl x:Name="areaPaginaPropia" Visibility="Collapsed"/>
-
             </Grid>
         </Grid>
-
         <!-- ===== STATUSBAR ===== -->
         <Border Grid.Row="2" Background="{StaticResource Chrome}"
                 BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
@@ -211,6 +219,5 @@
                            VerticalAlignment="Center"/>
             </StackPanel>
         </Border>
-
     </Grid>
 </Window>
